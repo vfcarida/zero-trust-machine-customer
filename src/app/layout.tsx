@@ -9,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'GemmaBridge | AI Bridging the Inclusion Gap',
+  title: 'Cliente Máquina Zero-Trust | PoC de Pagamentos M2M',
   description:
-    'GemmaBridge: AI Bridging the Inclusion Gap for Neurodiverse Learners using Google Gemma 4 E2B.',
+    'Prova de Conceito de Cliente Máquina Autônomo com conformidade Guard Mode e criptografia de rede overlay OpenZiti.',
 };
 
 export default function RootLayout({

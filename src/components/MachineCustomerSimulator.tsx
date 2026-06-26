@@ -298,7 +298,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {/* Bloco de pensamento inspirado no WhatsApp/GemmaFin */}
+                      {/* Bloco de pensamento inspirado na visualização de raciocínio da IA local */}
                       <div className="bg-slate-900/50 border border-slate-800/80 rounded-xl overflow-hidden">
                         <button
                           onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}

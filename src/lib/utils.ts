@@ -1,6 +1,5 @@
 // ============================================================================
-// GemmaBridge — Utility Functions
-// Pure utility functions used across the application.
+// Cliente Máquina Zero-Trust — Funções Utilitárias
 // ============================================================================
 
 /** Merges CSS class names, filtering out falsy values. */
