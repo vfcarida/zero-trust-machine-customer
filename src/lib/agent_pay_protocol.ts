@@ -1,23 +1,23 @@
 import crypto from 'crypto';
 
 /**
- * Interface representing the Mastercard Agent Pay for Machines (AP4M) 
- * x402 Protocol HTTP Payload structure.
+ * Interface que representa a estrutura do Payload HTTP do Protocolo x402 
+ * para o Agent Pay for Machines (AP4M) da Mastercard.
  */
 export interface X402Payload {
   x402Version: string;
   agentId: string;
   merchantId: string;
   intent: string;
-  amountUcents: number; // Value in micro-cents (1 USD = 1,000,000 ucents)
+  amountUcents: number; // Valor em micro-centavos (1 USD = 1.000.000 ucents)
   currency: string;
   timestamp: string;
   nonce: string;
-  signature: string; // Cryptographic signature of the payload
+  signature: string; // Assinatura criptográfica do payload
 }
 
 /**
- * Interface representing the merchant settlement response.
+ * Interface que representa a resposta de liquidação do fornecedor (merchant).
  */
 export interface X402SettlementResponse {
   success: boolean;
@@ -32,8 +32,8 @@ export interface X402SettlementResponse {
 }
 
 /**
- * Generates an RSA key pair for the machine customer agent.
- * In a real MetaMask Agent Wallet scenario, these would represent the agent's delegation keys.
+ * Gera um par de chaves RSA para o agente cliente máquina.
+ * Em um cenário de carteira MetaMask Agent Wallet, essas chaves representariam as chaves delegadas do agente.
  */
 export function generateAgentKeyPair(): { publicKey: string; privateKey: string } {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -52,10 +52,10 @@ export function generateAgentKeyPair(): { publicKey: string; privateKey: string 
 }
 
 /**
- * Helper to serialize the key fields of the payload for signature stability.
+ * Auxiliar para serializar os campos principais do payload para garantir a estabilidade da assinatura.
  */
 function serializePayload(payload: Omit<X402Payload, 'signature'>): string {
-  // Sort keys to ensure deterministic ordering
+  // Ordena as chaves para garantir consistência na serialização
   return JSON.stringify({
     x402Version: payload.x402Version,
     agentId: payload.agentId,
@@ -69,7 +69,7 @@ function serializePayload(payload: Omit<X402Payload, 'signature'>): string {
 }
 
 /**
- * Cryptographically signs the x402 payload using the agent's private key.
+ * Assina criptograficamente o payload x402 usando a chave privada do agente.
  */
 export function signX402Payload(
   payloadWithoutSignature: Omit<X402Payload, 'signature'>,
@@ -82,19 +82,19 @@ export function signX402Payload(
     sign.end();
     return sign.sign(privateKeyPem, 'base64');
   } catch (error) {
-    console.error('Error signing x402 payload:', error);
-    // Fallback signature in case of environment issue
+    console.error('Erro ao assinar payload x402:', error);
+    // Assinatura de fallback em caso de problema no ambiente
     return `sim_sig_${crypto.randomBytes(16).toString('hex')}`;
   }
 }
 
 /**
- * Cryptographically verifies the x402 payload signature using the agent's public key.
+ * Verifica criptograficamente a assinatura do payload x402 usando a chave pública do agente.
  */
 export function verifyX402Payload(payload: X402Payload, publicKeyPem: string): boolean {
   try {
     if (payload.signature.startsWith('sim_sig_')) {
-      return true; // Accept simulated signature in fallback mode
+      return true; // Aceita assinatura simulada em modo de fallback
     }
     const data = serializePayload(payload);
     const verify = crypto.createVerify('SHA256');
@@ -102,20 +102,20 @@ export function verifyX402Payload(payload: X402Payload, publicKeyPem: string): b
     verify.end();
     return verify.verify(publicKeyPem, payload.signature, 'base64');
   } catch (error) {
-    console.error('Error verifying x402 payload signature:', error);
+    console.error('Erro ao verificar assinatura do payload x402:', error);
     return false;
   }
 }
 
 /**
- * Simulates the settlement of an x402 transaction on the merchant side.
+ * Simula a liquidação de uma transação x402 no lado do fornecedor.
  */
 export async function processX402Settlement(
   payload: X402Payload,
   publicKeyPem: string,
   zitiSecured: boolean
 ): Promise<X402SettlementResponse> {
-  // 1. Verify cryptographic validity
+  // 1. Verifica validade criptográfica
   const isValidSignature = verifyX402Payload(payload, publicKeyPem);
   if (!isValidSignature) {
     return {
@@ -127,14 +127,14 @@ export async function processX402Settlement(
       authCode: '000000',
       timestamp: new Date().toISOString(),
       zitiSecured,
-      error: 'Invalid agent signature (Authentication Failed)',
+      error: 'Assinatura inválida do agente (Falha na Autenticação)',
     };
   }
 
-  // 2. Simulate processor settlement latency (300-800ms)
+  // 2. Simula a latência de liquidação do processador financeiro (300-800ms)
   await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500));
 
-  // 3. Generate receipt
+  // 3. Gera o comprovante/recibo de liquidação
   return {
     success: true,
     transactionId: `tx_${crypto.randomBytes(12).toString('hex')}`,

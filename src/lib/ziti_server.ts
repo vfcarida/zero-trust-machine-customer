@@ -1,20 +1,20 @@
 import fs from 'fs';
 import path from 'path';
 
-// Dynamically import the native SDK only on the server, with fallback
+// Importa dinamicamente o SDK nativo apenas no servidor, com fallback seguro
 let zitiSdk: any = null;
 let isZitiSdkLoaded = false;
 
 if (typeof window === 'undefined') {
   try {
-    // Hide the module name in a variable so Webpack does not try to statically resolve it at build time
+    // Esconde o nome do módulo em uma variável para que o Webpack não tente resolvê-lo estaticamente no build
     const zitiModuleName = '@openziti/ziti-sdk-nodejs';
     zitiSdk = require(zitiModuleName);
     isZitiSdkLoaded = true;
-    console.log('✅ OpenZiti Node.js Native SDK loaded successfully.');
+    console.log('✅ SDK Nativo Node.js do OpenZiti carregado com sucesso.');
   } catch (err: any) {
     console.warn(
-      '⚠️ OpenZiti Node.js Native SDK could not be loaded (running in high-fidelity Simulation Mode). Reason:',
+      '⚠️ O SDK Nativo do OpenZiti não pôde ser carregado (executando em Modo de Simulação de alta fidelidade). Motivo:',
       err.message || err
     );
   }
@@ -28,7 +28,7 @@ export interface ZitiTransmissionResult {
 }
 
 /**
- * Handles transmission of the payment payload via OpenZiti (Real SDK or High-Fidelity Simulator).
+ * Gerencia a transmissão do payload de pagamento via OpenZiti (SDK Real ou Simulador de Alta Fidelidade).
  */
 export async function transmitPayloadOverZiti(
   serviceName: string,
@@ -38,22 +38,22 @@ export async function transmitPayloadOverZiti(
   const logs: string[] = [];
   const start = Date.now();
   
-  logs.push(`[${new Date().toISOString()}] 🚀 Initiating Zero-Trust transmission tunnel`);
-  logs.push(`[${new Date().toISOString()}] 📦 Service Target: "${serviceName}"`);
+  logs.push(`[${new Date().toISOString()}] 🚀 Iniciando túnel de transmissão Zero-Trust`);
+  logs.push(`[${new Date().toISOString()}] 📦 Serviço Destino: "${serviceName}"`);
 
-  // Determine identity path
+  // Determina o caminho do arquivo de identidade
   const targetIdPath = identityFilePath || process.env.ZITI_IDENTITY_FILE || 'ziti-identity.json';
   const resolvedPath = path.resolve(process.cwd(), targetIdPath);
   
-  logs.push(`[${new Date().toISOString()}] 🔍 Looking for Ziti cryptographic identity file at: "${resolvedPath}"`);
+  logs.push(`[${new Date().toISOString()}] 🔍 Procurando arquivo de identidade criptográfica do Ziti em: "${resolvedPath}"`);
 
   const identityFileExists = fs.existsSync(resolvedPath);
   const useRealZiti = isZitiSdkLoaded && identityFileExists;
 
   if (useRealZiti) {
-    logs.push(`[${new Date().toISOString()}] 🔑 Identity file verified. Initializing OpenZiti Native Context...`);
+    logs.push(`[${new Date().toISOString()}] 🔑 Arquivo de identidade verificado. Inicializando Contexto Nativo OpenZiti...`);
     try {
-      // 1. Initialize SDK
+      // 1. Inicializa o SDK
       await new Promise<void>((resolve, reject) => {
         zitiSdk.init(resolvedPath, (err: any) => {
           if (err) {
@@ -63,16 +63,15 @@ export async function transmitPayloadOverZiti(
           }
         });
       });
-      logs.push(`[${new Date().toISOString()}] 🔒 Cryptographic context loaded. Mutual TLS handshakes completed with Controller.`);
-      logs.push(`[${new Date().toISOString()}] 🌐 Edge Controller connection established. Session Token: ziti_sess_${Math.random().toString(36).substring(2, 10)}`);
+      logs.push(`[${new Date().toISOString()}] 🔒 Contexto criptográfico carregado. Handshakes TLS mútuos concluídos com o Controller.`);
+      logs.push(`[${new Date().toISOString()}] 🌐 Conexão estabelecida com o Edge Controller. Token de Sessão: ziti_sess_${Math.random().toString(36).substring(2, 10)}`);
 
-      // 2. Resolve Service
-      logs.push(`[${new Date().toISOString()}] 📡 Querying fabric for service permission: "${serviceName}"...`);
-      // zitiSdk handle checking is implicit in httpRequest. If service doesn't exist, it will reject.
+      // 2. Resolve o serviço na malha
+      logs.push(`[${new Date().toISOString()}] 📡 Consultando permissões de serviço na malha para: "${serviceName}"...`);
       
-      // 3. Make HTTP POST Request over OpenZiti tunnel
-      logs.push(`[${new Date().toISOString()}] 🛡️ Opening dark outbound socket tunnel (no listening ports exposed)...`);
-      logs.push(`[${new Date().toISOString()}] 🔒 Encrypting request payload (AES-256-GCM)...`);
+      // 3. Efetua a requisição HTTP POST através do túnel Ziti
+      logs.push(`[${new Date().toISOString()}] 🛡️ Abrindo túnel de socket escuro de saída (sem portas de escuta expostas no host)...`);
+      logs.push(`[${new Date().toISOString()}] 🔒 Criptografando payload da requisição (AES-256-GCM)...`);
       
       const responseData = await new Promise<string>((resolve, reject) => {
         zitiSdk.httpRequest(
@@ -82,10 +81,10 @@ export async function transmitPayloadOverZiti(
           '/api/x402-settle',
           ['Content-Type: application/json', 'Accept: application/json'],
           (req: any) => {
-            // Write data
+            // Escreve os dados no socket do túnel
             const body = JSON.stringify(payload);
             zitiSdk.httpRequestData(req, body, () => {
-              logs.push(`[${new Date().toISOString()}] 🚀 Data packet successfully transmitted through overlay network.`);
+              logs.push(`[${new Date().toISOString()}] 🚀 Pacote de dados transmitido com sucesso através da rede overlay.`);
             });
           },
           (resp: any) => {
@@ -107,7 +106,7 @@ export async function transmitPayloadOverZiti(
       });
 
       const latency = Date.now() - start;
-      logs.push(`[${new Date().toISOString()}] 📥 Secure response received from target endpoint in ${latency}ms.`);
+      logs.push(`[${new Date().toISOString()}] 📥 Resposta segura recebida do endpoint destino em ${latency}ms.`);
       
       try {
         const parsedResp = JSON.parse(responseData);
@@ -125,25 +124,25 @@ export async function transmitPayloadOverZiti(
       }
 
     } catch (err: any) {
-      logs.push(`[${new Date().toISOString()}] ❌ OpenZiti Native Connection error: ${err.message || err}`);
-      logs.push(`[${new Date().toISOString()}] ⚠️ Failing back to Simulated Secure Sandbox...`);
+      logs.push(`[${new Date().toISOString()}] ❌ Erro na conexão nativa do OpenZiti: ${err.message || err}`);
+      logs.push(`[${new Date().toISOString()}] ⚠️ Redirecionando para Sandbox Seguro Simulado...`);
       return runZitiSimulation(serviceName, payload, resolvedPath, logs, start);
     }
   } else {
-    // Explanation of why simulation was chosen
+    // Log explicativo sobre a ativação do modo simulado
     if (!isZitiSdkLoaded) {
-      logs.push(`[${new Date().toISOString()}] ℹ️ Native OpenZiti binary SDK not available in this node process.`);
+      logs.push(`[${new Date().toISOString()}] ℹ️ O SDK nativo C++ do OpenZiti não está disponível no processo Node.`);
     }
     if (!identityFileExists) {
-      logs.push(`[${new Date().toISOString()}] ℹ️ Cryptographic identity file "ziti-identity.json" not found at path.`);
+      logs.push(`[${new Date().toISOString()}] ℹ️ Arquivo "ziti-identity.json" não encontrado no diretório root.`);
     }
-    logs.push(`[${new Date().toISOString()}] 🛠️ Spawning high-fidelity Zero-Trust Overlay Simulator...`);
+    logs.push(`[${new Date().toISOString()}] 🛠️ Iniciando Simulador de Rede Overlay Zero-Trust...`);
     return runZitiSimulation(serviceName, payload, resolvedPath, logs, start);
   }
 }
 
 /**
- * High-Fidelity Simulation of OpenZiti Overlay Operations.
+ * Simulação de Alta Fidelidade das operações de Rede Overlay OpenZiti.
  */
 async function runZitiSimulation(
   serviceName: string,
@@ -155,39 +154,39 @@ async function runZitiSimulation(
   const steps = [
     {
       delay: 200,
-      log: `📂 Loading cryptographic identity file from client credentials repository...`,
+      log: `📂 Carregando arquivo de identidade criptográfica do repositório de credenciais...`,
     },
     {
       delay: 350,
-      log: `🔒 Bootstrapping OpenZiti Engine (version 1.0.2). Initializing virtual interface...`,
+      log: `🔒 Inicializando motor OpenZiti (versão 1.0.2). Criando interface virtual...`,
     },
     {
       delay: 400,
-      log: `🔑 Performing PKI challenge-response with Ziti Controller. Ephemeral RSA key generated.`,
+      log: `🔑 Executando desafio-resposta PKI com o Ziti Controller. Chave efêmera RSA gerada.`,
     },
     {
       delay: 300,
-      log: `🌐 Controller mutual TLS authentication established. Client verified as legitimate agent identity.`,
+      log: `🌐 Autenticação TLS mútua com o Controller estabelecida. Identidade do agente verificada.`,
     },
     {
       delay: 350,
-      log: `📡 Querying Ziti overlay directory for target service "${serviceName}"...`,
+      log: `📡 Consultando diretório da malha Ziti pelo serviço destino "${serviceName}"...`,
     },
     {
       delay: 250,
-      log: `🔗 Service resolved! Routing path assigned: Client -> Router-A (Brazil-South) -> Router-B (Virginia-East) -> Dark Server Target.`,
+      log: `🔗 Serviço resolvido! Caminho de roteamento atribuído: Cliente -> Roteador-A (Brasil-Sul) -> Roteador-B (Virgínia-Leste) -> Endpoint Escuro Destino.`,
     },
     {
       delay: 400,
-      log: `🛡️ Creating end-to-end encrypted packet tunnel. Direct inbound listening ports are BLOCKED.`,
+      log: `🛡️ Criando túnel de pacotes criptografados ponta a ponta. Portas de escuta de entrada direta estão BLOQUEADAS.`,
     },
     {
       delay: 300,
-      log: `🔐 Encrypting x402 payload with AES-256-GCM. Session key hash: sha256:${crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').substring(0, 16)}...`,
+      log: `🔐 Criptografando payload x402 com AES-256-GCM. Hash da chave de sessão: sha256:${crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').substring(0, 16)}...`,
     },
     {
       delay: 450,
-      log: `🚀 Tunnel active. Transmitting secure microtransaction payload to merchant...`,
+      log: `🚀 Túnel ativo. Transmitindo payload de microtransação segura para o credenciador...`,
     },
   ];
 
@@ -196,9 +195,9 @@ async function runZitiSimulation(
     logs.push(`[${new Date().toISOString()}] ${step.log}`);
   }
 
-  // Simulate payment settlement on merchant side
+  // Simula a liquidação do pagamento no lado do fornecedor
   const latency = Date.now() - startTime;
-  logs.push(`[${new Date().toISOString()}] 📥 Merchant settlement API responded with HTTP 200 (Success) over OpenZiti in ${latency}ms.`);
+  logs.push(`[${new Date().toISOString()}] 📥 API de liquidação do fornecedor respondeu com HTTP 200 (Sucesso) via OpenZiti em ${latency}ms.`);
 
   const mockResponse = {
     success: true,
@@ -218,5 +217,4 @@ async function runZitiSimulation(
   };
 }
 
-// Node crypto dependency helper for random bytes
 import crypto from 'crypto';
