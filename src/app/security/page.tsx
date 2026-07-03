@@ -118,6 +118,7 @@ export default function SecurityPage() {
             
             {/* Chave liga/desliga */}
             <button
+              id="toggle-guard-btn"
               onClick={handleToggleGuard}
               className={`w-12 h-6 rounded-full p-1 transition-all ${
                 guardSettings.enabled ? 'bg-indigo-600' : 'bg-slate-700'
@@ -139,6 +140,7 @@ export default function SecurityPage() {
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-mono text-sm">$</span>
                 <input
+                  id="limit-spend-input"
                   type="number"
                   step="0.01"
                   min="0.01"
@@ -150,6 +152,7 @@ export default function SecurityPage() {
               </div>
             </div>
             <button
+              id="save-limit-btn"
               type="submit"
               disabled={!guardSettings.enabled}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-550 text-white font-bold py-3 rounded-xl transition-all text-sm"
@@ -182,6 +185,7 @@ export default function SecurityPage() {
 
             <form onSubmit={handleAddMerchant} className="flex space-x-2 mb-4">
               <input
+                id="new-merchant-input"
                 type="text"
                 placeholder="ID do Fornecedor (ex: aws_compute)"
                 disabled={!guardSettings.enabled}
@@ -190,6 +194,7 @@ export default function SecurityPage() {
                 className="flex-1 bg-slate-950 border border-slate-850 focus:border-indigo-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl font-mono text-xs outline-none transition-all"
               />
               <button
+                id="add-merchant-btn"
                 type="submit"
                 disabled={!guardSettings.enabled}
                 className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-850 disabled:text-slate-600 text-white font-bold px-4 rounded-xl transition-all"
@@ -204,6 +209,7 @@ export default function SecurityPage() {
                 <div key={m} className="flex items-center justify-between bg-slate-950 border border-slate-850 px-4 py-2.5 rounded-xl font-mono text-xs">
                   <span className="text-slate-350 font-bold">{m}</span>
                   <button
+                    id={`remove-merchant-btn-${m}`}
                     disabled={!guardSettings.enabled}
                     onClick={() => handleRemoveMerchant(m)}
                     className="text-slate-500 hover:text-rose-400 disabled:opacity-30 transition-colors"
@@ -233,6 +239,7 @@ export default function SecurityPage() {
             <span>Assinador Criptográfico RSA (Chaves de Delegação)</span>
           </h2>
           <button
+            id="rotate-keys-btn"
             onClick={() => {
               rotateKeys();
               showToast('Par de chaves RSA rotacionado com sucesso!', 'success');

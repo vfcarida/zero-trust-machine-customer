@@ -1,99 +1,124 @@
-# Cliente Máquina Zero-Trust 🤖🔒
+# Zero-Trust Machine Customer 🤖🔒
 
-Este repositório contém o código de uma Prova de Conceito (PoC) para um ecossistema financeiro baseado na economia de **"Clientes Máquina" (Machine-to-Machine - M2M)**. 
+This repository contains a production-grade Proof of Concept (PoC) for an autonomous transactional ecosystem based on **Machine-to-Machine (M2M)** payments and Zero-Trust network architectures. 
 
-A aplicação simula uma infraestrutura agêntica de conformidade e pagamento autônomo na borda. O agente local de inteligência artificial (Gemma 4 E2B) monitora a telemetria do hardware, toma decisões de compra autônomas, liquida as transações pelo protocolo **x450/x402 (Mastercard AP4M)** com assinatura RSA digital e transmite os dados criptografados em mTLS pela malha de rede overlay Zero-Trust do **OpenZiti**.
+The application simulates edge-native autonomous procurement. An edge AI agent (Gemma 4 E2B) monitors hardware telemetry levels, makes procurement decisions, constructs and cryptographically signs **Mastercard AP4M (x402 protocol)** payment payloads, subjects them to a local **Wallet Guard Mode** compliance firewall, and transmits them over a software-defined **OpenZiti** Zero-Trust overlay network.
 
 ---
 
-## 🚀 Visão Geral e Arquitetura
+## 🚀 Architectural Blueprint
 
-O sistema é construído sobre o **Next.js 16 (App Router)** e opera localmente em uma abordagem *offline-first*. O fluxo das transações ocorre da seguinte forma:
+The application is built on **Next.js 16 (App Router)** and utilizes an offline-first resilient architecture. Below is the transaction lifecycle flow:
 
-```text
-[Sensores Telemetria] ──(Nível Baixo)──> [Gemma 4 E2B Local] ──(JSON de Compra)──> [Guard Mode] 
-                                                                                        │
-                                                                                    (Aprovado)
-                                                                                        ▼
-[Receita de Liquidação] <──(mTLS Túnel)── [Serviço Escuro Ziti] <─── [API Gateway / OpenZiti SDK]
+```mermaid
+graph TD
+    subgraph Client [Machine Customer Client / Browser]
+        A[Hardware Telemetry: Compute/Coolant] -->|Level < 20%| B[Local Gemma 4 E2B Engine]
+        B -->|1. Reason with think| C[x402 JSON Payload Generated]
+        C -->|2. Delegated Key Signing| D[Cryptographically Signed Payload]
+        D -->|3. Local Wallet Guard Mode Firewall| E{Compliance Checks}
+        E -->|Rejected| F[Blocked Ledger Entry]
+        E -->|Approved| G[Send to API Boundary]
+    end
+    subgraph Edge_Mesh [Zero-Trust OpenZiti Overlay Network]
+        G -->|4. Post Request| H[Next.js API Gateway Route]
+        H -->|5. Validate Signature Defense-in-Depth| I{Signature Verified?}
+        I -->|Invalid| J[Reject 401 Unauthorized]
+        I -->|Valid| K[OpenZiti Outbound Dark Socket Tunnel]
+        K -->|6. Mutual TLS Handshake| L[OpenZiti Edge Controller]
+        K -->|7. AES-256-GCM End-to-End Encrypted Tunnel| M[Target Mesh Service ap4m-settlement]
+    end
+    subgraph Acquirer_Server [Dark Target Host / No Ingress Ports]
+        M -->|8. Settlement Processing| N[Merchant Acquirer Ledger]
+        N -->|9. Settlement Receipt / Auth Code| M
+        M -->|10. Response Payload| K
+        K -->|11. Success Response| H
+        H -->|12. Transaction Logged| O[Local Ledger Storage]
+    end
 ```
 
-1.  **Monitoramento de Telemetria (Insumos)**: Os recursos operacionais da máquina (núcleos de processamento em nuvem e nível de fluido refrigerante) são drenados constantemente.
-2.  **Motor de Decisão (Gemma 4 E2B)**: Quando os insumos atingem um nível crítico (abaixo de 20%), o motor local de IA é acionado com um Prompt de Sistema específico. Utilizando um modo de pensamento estruturado (`<|think|>`), o modelo calcula a quantidade necessária, o fornecedor ideal e cospe um JSON com a intenção de compra.
-3.  **Controle de Políticas (Guard Mode)**: A aplicação intercepta o JSON gerado e o avalia contra as regras locais de limite de gasto diário e allowlist de fornecedores (inspirado na MetaMask Agent Wallet).
-4.  **Transmissão Segura (OpenZiti)**: Transações aprovadas são enviadas ao backend Next.js, que estabelece um canal mTLS criptografado por software via SDK do OpenZiti para liquidar o pagamento no fornecedor de forma 100% escura (sem expor portas públicas no host).
+### Flow Execution Breakdown:
+1. **Hardware Telemetry Monitor**: Operation resources (cloud compute cores and coolant fluid) steadily deplete over time.
+2. **AI Decision Engine (Gemma 4 E2B)**: When resources hit a critical threshold (< 20%), a local LLM prompt is executed. Using structured reasoning chain thoughts (`<|think|>`), it determines the optimal replenishment amount and creates the purchase JSON payload.
+3. **Wallet Guard Mode Firewall**: The payload is intercepted and evaluated against daily spending limits and allowed vendor rules (similar to delegated agent wallets like MetaMask Agent Wallet).
+4. **Zero-Trust Secure Transit (OpenZiti)**: Approved transactions are posted to the Next.js backend, which initializes an outbound cryptographically secured mTLS session with the OpenZiti network. It resolves the dark target service `ap4m-settlement-service` with no inbound open ports on the host firewalls, preventing key leaks and network scanners.
 
 ---
 
-## ✨ Funcionalidades Principais
+## ✨ Core Innovations
 
-*   **Prompt Center e Motor Local**: Controle visual do prompt de sistema injetado no Gemma E2B e exibição interativa da cadeia de raciocínio lógico em blocos de pensamento.
-*   **Protocolo de Liquidação M2M (x402)**: Geração de payloads estruturados em micro-centavos com suporte a assinaturas digitais RSA-256 geradas pelo próprio assinador do agente.
-*   **Wallet Guard Mode**: Middleware local para bloqueio preventivo de gastos excessivos ou comunicação com fornecedores não homologados.
-*   **Grafo de Rede OpenZiti**: Visualizador dinâmico da topologia overlay com logs criptográficos de handshakes TLS e encriptação AES-256-GCM.
-*   **Ledger Histórico**: Banco de auditoria criptográfica local (LocalStorage) para inspeção de transações liquidadas ou bloqueadas pelo Guard Mode.
+* **Local AI Execution & Reasoning**: Visualizes the prompt config injected to Gemma E2B alongside a real-time logical reasoning terminal capturing `<|think|>` tokens.
+* **x402 M2M Payment Protocol**: Encodes transactions in micro-cents (`ucents`) using Mastercard AP4M standard structures with RSA-2048 signing keys.
+* **Resilient Offline Storage**: Uses robust serialization and safe parsing to prevent corrupted browser data from crashing the dashboard.
+* **Race Condition Protection**: Employs synchronized queue locks to process concurrent transactions, protecting budgets from duplicate spend race conditions.
+* **OpenZiti Overlay Topology**: Dynamic network status board visualizing PKI handshakes, mTLS status, and secure transmission events.
+* **Cryptographic Ledger**: Complete audit ledger logs showing transaction hashes, authorization codes, and network transport details.
 
 ---
 
-## 🏗️ Estrutura do Projeto
+## 🏗️ Project Structure
 
 ```text
 src/
 ├── app/
-│   ├── api/transmit-ziti/    # Gateway para encapsulamento de chamadas OpenZiti
-│   ├── ledger/               # Página de auditoria do livro transacional
-│   ├── network/              # Visualizações de topologia de rede overlay
-│   ├── security/             # Painel de limites de conformidade e chaves RSA
-│   ├── globals.css           # Estilos globais e tokens visuais
-│   ├── layout.tsx            # Layout principal
-│   └── page.tsx              # Página inicial do simulador
+│   ├── api/transmit-ziti/    # OpenZiti client-server transit gateway route
+│   ├── ledger/               # Ledger audit ledger dashboard page
+│   ├── network/              # Overlay network routing topology page
+│   ├── security/             # Security compliance & wallet key managers page
+│   ├── globals.css           # Global Tailwind and visual tokens
+│   ├── layout.tsx            # Main layout wrapper
+│   └── page.tsx              # Simulator dashboard root entry point
 ├── components/
-│   ├── layout/sidebar.tsx    # Menu lateral de navegação
-│   ├── MachineCustomerSimulator.tsx # Dashboard de controle do Cliente Máquina
+│   ├── layout/sidebar.tsx    # Responsive side navigation
+│   ├── MachineCustomerSimulator.tsx # Autopilot simulator interface controller
 │   └── ...
 ├── hooks/
-│   └── use-simulation.tsx    # React Context que orquestra a telemetria e o fluxo AI
+│   └── use-simulation.tsx    # Simulation React Context orchestrating telemetry
 └── lib/
-    ├── agent_pay_protocol.ts # Protocolo x402 e utilitários de criptografia
-    ├── AgentGuardMode.ts     # Middleware de conformidade e orçamentos
-    ├── constants.ts          # Definições de rotas e fornecedores aprovados
-    └── ziti_server.ts        # Integração e logs do SDK OpenZiti
+    ├── agent_pay_protocol.ts # Mastercard AP4M x402 protocol and RSA signatures
+    ├── AgentGuardMode.ts     # Local wallet compliance rules and limits
+    ├── constants.ts          # Routes and approved supplier configurations
+    └── ziti_server.ts        # OpenZiti Node.js SDK connector and fallback simulator
 ```
 
 ---
 
-## ⚙️ Configuração e Execução
+## ⚙️ Installation & Running
 
-### Pré-requisitos
-*   **Node.js**: v20 ou superior
-*   **npm**: v10 ou superior
+### Prerequisites
+* **Node.js**: v20 or superior
+* **npm**: v10 or superior
 
-### Inicialização
-1.  Instale as dependências locais:
-    ```bash
-    npm install
-    ```
-2.  Inicie o servidor de desenvolvimento:
-    ```bash
-    npm run dev
-    ```
-3.  Acesse `http://localhost:3000` no seu navegador.
+### Running Locally
+1. Install project dependencies:
+   ```bash
+   npm install
+   ```
+2. Run development server:
+   ```bash
+   npm run dev
+   ```
+3. Open [http://localhost:3000](http://localhost:3000) in your web browser.
 
-### Compilação de Produção
-Para verificar a integridade estrita e compilar a aplicação para produção:
+### Running Automated Test Suite
+Run the full Vitest suite (including library unit tests, state management hooks integration tests, and API endpoint routing validation):
+```bash
+npm test
+```
+
+### Production Compilation
+Build a optimized static application bundle:
 ```bash
 npm run build
 ```
 
 ---
 
-## 🛡️ Integração Nativa do OpenZiti
+## 🛡️ Native OpenZiti Setup
 
-Por padrão, a aplicação executa em **Modo de Simulação de Alta Fidelidade**, gerando logs detalhados de PKI e controle de rede. Para transacionar em uma rede overlay real:
+By default, the application runs in a **High-Fidelity Simulation Mode** to provide interactive logs. To run transactions over a live OpenZiti overlay network:
 
-1.  Suba uma controladora OpenZiti local (por exemplo, via Docker Quickstart).
-2.  Crie as identidades e o serviço correspondente (`ap4m-settlement-service`).
-3.  Efetue o enrollment da identidade do cliente gerando o certificado `ziti-identity.json`.
-4.  Mova o arquivo `ziti-identity.json` para a raiz deste diretório. O backend Next.js fará o bootstrap nativo mTLS automaticamente!
-
-*Veja as instruções completas de CLI e Docker no arquivo de roteamento de auditoria.*
+1. Deploy a local OpenZiti controller and edge router (e.g., via Docker quickstart).
+2. Register the machine customer client and the merchant endpoint identities, and map the `ap4m-settlement-service` routing.
+3. Complete client enrollment and save the resulting identity configuration file to `ziti-identity.json`.
+4. Place `ziti-identity.json` in the root folder of this project. The Next.js API route will automatically detect it and upgrade simulation traffic to native mTLS tunnels!

@@ -93,6 +93,7 @@ export const MachineCustomerSimulator: React.FC = () => {
             </p>
           </div>
           <button
+            id="autopilot-toggle-btn"
             onClick={() => setIsAutopilot(!isAutopilot)}
             className={`ml-auto flex items-center justify-center p-2 rounded-xl transition-all border ${
               isAutopilot
@@ -182,6 +183,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                           Lote: {res.replenishQuantity} {res.unitName} (${((res.replenishQuantity * res.costPerUnitUcents) / 1000000).toFixed(2)})
                         </span>
                         <button
+                          id={`replenish-btn-${res.type}`}
                           disabled={isProcessing}
                           onClick={() => handleManualTrigger(res.type)}
                           className="flex items-center space-x-1.5 text-[11px] font-bold bg-slate-850 hover:bg-slate-800 disabled:opacity-50 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-800 transition-colors"
@@ -259,6 +261,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                   <span>Terminal Gemma E2B local</span>
                 </h2>
                 <button
+                  id="prompt-config-toggle"
                   onClick={() => setShowPromptConfig(!showPromptConfig)}
                   className="text-[10px] text-indigo-400 hover:text-indigo-300 font-mono font-bold"
                 >
@@ -273,6 +276,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                     Prompt de Sistema Injetado (M2M)
                   </label>
                   <textarea
+                    id="system-prompt-textarea"
                     rows={4}
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
@@ -493,6 +497,7 @@ export const MachineCustomerSimulator: React.FC = () => {
             </p>
           </div>
           <button
+            id="clear-ledger-btn"
             onClick={clearLedger}
             className="flex items-center space-x-1 text-[11px] font-bold text-slate-400 hover:text-slate-200 border border-slate-850 hover:border-slate-800 bg-slate-950/80 px-3 py-1.5 rounded-xl transition-all"
           >
@@ -560,6 +565,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                     <td className="py-3.5 text-slate-500">{item.authCode || 'N/A'}</td>
                     <td className="py-3.5 text-right">
                       <button
+                        id={`inspect-btn-${item.id}`}
                         onClick={() => setSelectedLedgerItem(item)}
                         className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 underline"
                       >
@@ -590,6 +596,7 @@ export const MachineCustomerSimulator: React.FC = () => {
                   </p>
                 </div>
                 <button
+                  id="close-inspect-btn"
                   onClick={() => setSelectedLedgerItem(null)}
                   className="p-1.5 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl transition-all"
                 >

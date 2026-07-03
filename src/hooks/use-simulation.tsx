@@ -12,12 +12,13 @@ import {
   DEFAULT_GUARD_SETTINGS, 
   evaluateTransaction 
 } from '@/lib/AgentGuardMode';
+import { safeJsonParse } from '@/lib/utils';
 
-// Tipos de recursos do inventário
+// Inventory resource interface definition
 export interface ResourceState {
   name: string;
   type: 'compute' | 'coolant';
-  level: number; // 0 a 100
+  level: number; // Percentage value (0 to 100)
   capacity: string;
   costPerUnitUcents: number;
   replenishQuantity: number;
@@ -25,6 +26,7 @@ export interface ResourceState {
   unitName: string;
 }
 
+// Transaction register record definition
 export interface LedgerItem {
   id: string;
   timestamp: string;
@@ -63,27 +65,27 @@ const SimulationContext = createContext<SimulationContextType | undefined>(undef
 export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mounted, setMounted] = useState(false);
   
-  // 1. Estados Centrais
+  // 1. Core States
   const [inventory, setInventory] = useState<Record<'compute' | 'coolant', ResourceState>>({
     compute: {
-      name: 'Processamento de CPU em Nuvem',
+      name: 'Cloud CPU Compute instances',
       type: 'compute',
       level: 85,
       capacity: '64 Cores',
-      costPerUnitUcents: 250000, // $0.25 por core-hora
-      replenishQuantity: 32, // Reabastece 32 unidades ($8.00)
+      costPerUnitUcents: 250000, // $0.25 USD per core-hour
+      replenishQuantity: 32, // Refills 32 units ($8.00 USD)
       merchantId: 'aws_compute',
       unitName: 'Cores',
     },
     coolant: {
-      name: 'Nível de Fluido Coolant',
+      name: 'Hardware Coolant Reserve Level',
       type: 'coolant',
       level: 75,
-      capacity: '50 Litros',
-      costPerUnitUcents: 400000, // $0.40 por Litro
-      replenishQuantity: 15, // Reabastece 15 Litros ($6.00)
+      capacity: '50 Liters',
+      costPerUnitUcents: 400000, // $0.40 USD per Liter
+      replenishQuantity: 15, // Refills 15 Liters ($6.00 USD)
       merchantId: 'mcmaster_carr',
-      unitName: 'Litros',
+      unitName: 'Liters',
     },
   });
 
@@ -95,49 +97,87 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [aiLogs, setAiLogs] = useState<string[]>([]);
   
-  const autopilotRef = useRef(isAutopilot);
-  autopilotRef.current = isAutopilot;
+  // Synchronization references to prevent race conditions during asynchronous state updates
+  const dailySpendRef = useRef<number>(0);
+  const inventoryRef = useRef<Record<'compute' | 'coolant', ResourceState>>(inventory);
+  const queueRef = useRef<(() => Promise<any>)[]>([]);
+  const queueProcessingRef = useRef<boolean>(false);
 
-  // 2. Carrega / Salva do LocalStorage (Offline-First)
+  // Synchronize state references
+  useEffect(() => {
+    dailySpendRef.current = dailySpendUcents;
+  }, [dailySpendUcents]);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  // Offline-first safe storage bootstrap
   useEffect(() => {
     setMounted(true);
     
-    // Chaves criptográficas
+    // Cryptographic delegation keys
     const savedKeys = localStorage.getItem('zt-agent-keys');
     if (savedKeys) {
-      setAgentKeys(JSON.parse(savedKeys));
+      const keys = safeJsonParse(savedKeys, null);
+      if (keys) {
+        setAgentKeys(keys);
+      } else {
+        const keys = generateAgentKeyPair();
+        localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
+        setAgentKeys(keys);
+      }
     } else {
       const keys = generateAgentKeyPair();
       localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
       setAgentKeys(keys);
     }
 
-    // Configurações do Guard Mode
+    // Wallet Guard Mode settings
     const savedSettings = localStorage.getItem('zt-guard-settings');
     if (savedSettings) {
-      setGuardSettingsState(JSON.parse(savedSettings));
+      const settings = safeJsonParse<GuardSettings | null>(savedSettings, null);
+      if (settings) {
+        setGuardSettingsState(settings);
+      }
     }
 
-    // Ledger transacional
+    // Ledger transactions list
     const savedLedger = localStorage.getItem('zt-ledger');
     if (savedLedger) {
-      const parsedLedger = JSON.parse(savedLedger);
+      const parsedLedger = safeJsonParse<LedgerItem[]>(savedLedger, []);
       setLedger(parsedLedger);
       
-      // Calcula gastos acumulados no dia de hoje
+      // Calculate today's spending limit compliance
       const todayStr = new Date().toISOString().split('T')[0];
       const todaySpend = parsedLedger
-        .filter((item: LedgerItem) => item.status === 'SUCCESS' && item.timestamp.startsWith(todayStr))
-        .reduce((sum: number, item: LedgerItem) => sum + item.amountUcents, 0);
+        .filter((item) => item.status === 'SUCCESS' && item.timestamp.startsWith(todayStr))
+        .reduce((sum, item) => sum + item.amountUcents, 0);
       setDailySpendUcents(todaySpend);
+      dailySpendRef.current = todaySpend;
     }
 
-    // Níveis do Inventário
+    // Inventory states
     const savedInv = localStorage.getItem('zt-inventory');
     if (savedInv) {
-      setInventory(JSON.parse(savedInv));
+      const parsedInv = safeJsonParse<Record<'compute' | 'coolant', ResourceState> | null>(savedInv, null);
+      if (parsedInv) {
+        setInventory(parsedInv);
+        inventoryRef.current = parsedInv;
+      }
     }
   }, []);
+
+  // Sync state modifications back to local storage cleanly inside side effect hooks (React Purity)
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('zt-inventory', JSON.stringify(inventory));
+  }, [inventory, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    localStorage.setItem('zt-ledger', JSON.stringify(ledger));
+  }, [ledger, mounted]);
 
   const setGuardSettings = (settings: GuardSettings) => {
     setGuardSettingsState(settings);
@@ -153,12 +193,17 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const clearLedger = () => {
     setLedger([]);
     setDailySpendUcents(0);
+    dailySpendRef.current = 0;
     localStorage.removeItem('zt-ledger');
   };
 
-  // 3. Ticker de Consumo/Drenagem dos Recursos
+  // Hardware depletion simulation loop (every 4 seconds)
   useEffect(() => {
     if (!mounted) return;
+
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+      return;
+    }
 
     const interval = setInterval(() => {
       setInventory((prev) => {
@@ -172,16 +217,14 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             level: Math.max(0, prev.coolant.level - (0.3 + Math.random() * 1.2)),
           },
         };
-        localStorage.setItem('zt-inventory', JSON.stringify(next));
         return next;
       });
-    }, 4000); // drena a cada 4 segundos
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [mounted]);
 
-  // 4. Trigger do Autopiloto Agêntico
-  // Monitora níveis de hardware: quando algum nível cai abaixo de 20%, o autopiloto AI é acionado
+  // Autopilot loop: monitors critical depletion state (< 20%)
   useEffect(() => {
     if (!mounted || isProcessing || !isAutopilot) return;
 
@@ -190,14 +233,14 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setIsProcessing(true);
         await triggerAIProcurement(
           'compute',
-          `Telemetria Crítica: Nível de processamento em nuvem em ${inventory.compute.level.toFixed(1)}%. Solicitando alocação urgente de novos cores.`
+          `Telemetria Crítica: Cloud processing capacity at ${inventory.compute.level.toFixed(1)}%. Triggering urgent Core allocation request.`
         );
         setIsProcessing(false);
       } else if (inventory.coolant.level < 20 && !isProcessing) {
         setIsProcessing(true);
         await triggerAIProcurement(
           'coolant',
-          `Alerta Físico: Nível de fluido coolant abaixo do limite mínimo de segurança (${inventory.coolant.level.toFixed(1)}%). Reabastecendo reservatório.`
+          `Physical Alert: Coolant fluid below safe operational bounds (${inventory.coolant.level.toFixed(1)}%). Replenishing reservoir.`
         );
         setIsProcessing(false);
       }
@@ -206,38 +249,77 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     checkAndProcure();
   }, [inventory, isAutopilot, isProcessing, mounted]);
 
+  // Sequential task executor to prevent concurrent transaction budget race conditions
+  const runQueue = async () => {
+    if (queueProcessingRef.current) return;
+    queueProcessingRef.current = true;
+    
+    while (queueRef.current.length > 0) {
+      const task = queueRef.current.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (err) {
+          console.error('Queue task execution failure:', err);
+        }
+      }
+    }
+    
+    queueProcessingRef.current = false;
+  };
+
   /**
-   * Pipeline de decisão de IA local Gemma 4 E2B + Assinatura x402 + Interceptor Guard + Envio Ziti.
+   * Enqueues and triggers the machine procurement pipeline: 
+   * Gemma model decision -> Payload generation -> Guard Mode compliance check -> OpenZiti routing.
    */
-  const triggerAIProcurement = async (
+  const triggerAIProcurement = (
     resourceType: 'compute' | 'coolant',
     reasoning: string
   ): Promise<LedgerItem> => {
-    const res = inventory[resourceType];
+    return new Promise((resolve, reject) => {
+      queueRef.current.push(async () => {
+        try {
+          const item = await executeAIProcurement(resourceType, reasoning);
+          resolve(item);
+        } catch (err) {
+          reject(err);
+        }
+      });
+      runQueue();
+    });
+  };
+
+  /**
+   * Internal synchronized procurement execution.
+   */
+  const executeAIProcurement = async (
+    resourceType: 'compute' | 'coolant',
+    reasoning: string
+  ): Promise<LedgerItem> => {
+    const res = inventoryRef.current[resourceType];
     const amountUcents = res.replenishQuantity * res.costPerUnitUcents;
-    const intent = `Compra autônoma de ${res.replenishQuantity} ${res.unitName} para ${res.name}`;
+    const intent = `Autonomous purchase of ${res.replenishQuantity} ${res.unitName} for ${res.name}`;
     const ledgerId = `item_${Date.now()}`;
     const itemLogs: string[] = [];
 
-    // Stream de logs do agente
     setAiLogs([]);
     const logToAI = (text: string) => {
       itemLogs.push(`[Gemma E2B] ${text}`);
       setAiLogs((prev) => [...prev, text]);
     };
 
-    logToAI(`🧠 Instanciando motor local Gemma 4 E2B (Edge-to-Browser)...`);
-    await new Promise((r) => setTimeout(r, 600));
-    logToAI(`📥 Carregando contexto de telemetria local: { recurso: "${res.name}", nívelAtual: ${res.level.toFixed(1)}%, limiteMínimo: 20.0% }`);
-    await new Promise((r) => setTimeout(r, 800));
-    logToAI(`⚙️ Injetando Prompt de Sistema: "Você é um Cliente Máquina Autônomo e responsável pela conformidade financeira do inventário M2M de processamento. Analise o estado e gere uma decisão de compra no formato JSON x402."`);
-    await new Promise((r) => setTimeout(r, 1000));
-    logToAI(`🤔 Raciocínio (<|think|>): Telemetria indica escassez. Nível operacional violado. Identificando fornecedor aprovado na malha: "${res.merchantId}".`);
-    await new Promise((r) => setTimeout(r, 700));
-    logToAI(`📊 Calculando despesas: ${res.replenishQuantity} unidades * $${(res.costPerUnitUcents / 1000000).toFixed(2)} = $${(amountUcents / 1000000).toFixed(2)} USD.`);
-    await new Promise((r) => setTimeout(r, 900));
+    logToAI(`🧠 Spawning local Gemma 4 E2B engine (Edge-to-Browser)...`);
+    await new Promise((r) => setTimeout(r, 400));
+    logToAI(`📥 Loading telemetry context: { resource: "${res.name}", currentLevel: ${res.level.toFixed(1)}%, criticalBound: 20.0% }`);
+    await new Promise((r) => setTimeout(r, 400));
+    logToAI(`⚙️ Injecting System Prompt: "You are an autonomous Machine Customer Agent responsible for M2M procurement budget compliance. Decide purchase in x402 JSON format."`);
+    await new Promise((r) => setTimeout(r, 500));
+    logToAI(`🤔 Thinking (<|think|>): Telemetry matches depletion thresholds. Resolving merchant identity: "${res.merchantId}".`);
+    await new Promise((r) => setTimeout(r, 400));
+    logToAI(`📊 Calculating cost calculation: ${res.replenishQuantity} units * $${(res.costPerUnitUcents / 1000000).toFixed(2)} = $${(amountUcents / 1000000).toFixed(2)} USD.`);
+    await new Promise((r) => setTimeout(r, 400));
     
-    // Cria payload
+    // Create base x402 payment payload
     const rawPayload: Omit<X402Payload, 'signature'> = {
       x402Version: '1.0.0',
       agentId: 'did:key:z6MkqB3zV18xPzT9m74H6eF8w4xY7tQ8rL2eD6jP3tS1vW',
@@ -249,27 +331,28 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       nonce: Math.random().toString(36).substring(2, 15),
     };
 
-    logToAI(`📝 Construindo estrutura do payload padrão x402 (Mastercard AP4M)...`);
-    await new Promise((r) => setTimeout(r, 500));
+    logToAI(`📝 Formatting payload to Mastercard AP4M standard structure...`);
+    await new Promise((r) => setTimeout(r, 300));
 
-    // Assinatura RSA
+    // Sign payload
     const signature = signX402Payload(rawPayload, agentKeys?.privateKey || '');
     const signedPayload: X402Payload = { ...rawPayload, signature };
     
-    logToAI(`🔑 Assinando payload com chave privada RSA-2048 delegada do agente...`);
-    logToAI(`🖋️ Assinatura criptográfica gerada: ${signature.substring(0, 24)}...`);
-    await new Promise((r) => setTimeout(r, 600));
+    logToAI(`🔑 Signing payload with RSA-2048 delegated agent wallet private key...`);
+    logToAI(`🖋️ Generated cryptographic signature: ${signature.substring(0, 24)}...`);
+    await new Promise((r) => setTimeout(r, 300));
 
-    // Validação Guard Mode
-    logToAI(`🛡️ Enviando transação assinada para o validador local de políticas Guard Mode da carteira...`);
-    await new Promise((r) => setTimeout(r, 800));
+    // Enforce Guard Mode compliance check
+    logToAI(`🛡️ Sending signed payload to wallet-local Guard Mode firewall...`);
+    await new Promise((r) => setTimeout(r, 400));
 
-    const guardResult = evaluateTransaction(signedPayload, dailySpendUcents, guardSettings);
+    // Use synchronized ref for current spend to prevent race condition bypasses
+    const guardResult = evaluateTransaction(signedPayload, dailySpendRef.current, guardSettings);
 
     let newLedgerItem: LedgerItem;
 
     if (!guardResult.approved) {
-      logToAI(`❌ Alerta do Guard Mode: TRANSAÇÃO REJEITADA. Motivo: ${guardResult.reason}`);
+      logToAI(`❌ Guard Mode Alert: TRANSACTION REJECTED. Reason: ${guardResult.reason}`);
       
       newLedgerItem = {
         id: ledgerId,
@@ -286,12 +369,12 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         payload: signedPayload,
       };
     } else {
-      logToAI(`✅ Verificação do Guard Mode: APROVADO. Orçamento diário e allowlist validados com sucesso.`);
-      logToAI(`🌐 Encaminhando transação criptografada para o endpoint da malha OpenZiti...`);
-      await new Promise((r) => setTimeout(r, 500));
+      logToAI(`✅ Guard Mode Verification: APPROVED. Daily limit and allowlist validations passed.`);
+      logToAI(`🌐 Dispatching secure overlay transaction to OpenZiti Edge Router...`);
+      await new Promise((r) => setTimeout(r, 300));
 
       try {
-        // Envia para a API Route Next.js para tunelamento no servidor
+        // Post payload to Next.js API Route for server-side native tunneling
         const response = await fetch('/api/transmit-ziti', {
           method: 'POST',
           headers: {
@@ -305,30 +388,30 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         const data = await response.json();
         
-        // Anexa logs do OpenZiti do servidor nos logs da transação
+        // Append server-side Ziti tunnel events logs to agent log history
         if (data.logs) {
           data.logs.forEach((logLine: string) => itemLogs.push(logLine));
         }
 
         if (response.ok && data.success && data.responsePayload.success) {
           const settlement: X402SettlementResponse = data.responsePayload;
-          logToAI(`🎉 Transação liquidada e confirmada! Ref Autorização: ${settlement.authCode}.`);
+          logToAI(`🎉 Transaction settled successfully! Auth reference: ${settlement.authCode}.`);
           
-          // Reabastece o recurso
-          setInventory((prev) => {
-            const next = {
-              ...prev,
-              [resourceType]: {
-                ...prev[resourceType],
-                level: Math.min(100, prev[resourceType].level + 50), // Sobe 50%
-              },
-            };
-            localStorage.setItem('zt-inventory', JSON.stringify(next));
-            return next;
-          });
+          // Refill hardware resource level
+          const nextInventory = {
+            ...inventoryRef.current,
+            [resourceType]: {
+              ...inventoryRef.current[resourceType],
+              level: Math.min(100, inventoryRef.current[resourceType].level + 50), // Increment by 50% capacity
+            },
+          };
+          setInventory(nextInventory);
+          inventoryRef.current = nextInventory;
 
-          // Registra o gasto diário
-          setDailySpendUcents((prev) => prev + amountUcents);
+          // Increment daily spend synchronized counter
+          const nextDailySpend = dailySpendRef.current + amountUcents;
+          dailySpendRef.current = nextDailySpend;
+          setDailySpendUcents(nextDailySpend);
 
           newLedgerItem = {
             id: ledgerId,
@@ -346,7 +429,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             payload: signedPayload,
           };
         } else {
-          logToAI(`❌ Falha na Liquidação da Transação: ${data.error || 'Erro desconhecido'}`);
+          logToAI(`❌ Settlement Processor Failure: ${data.error || 'Unknown processor error'}`);
           
           newLedgerItem = {
             id: ledgerId,
@@ -363,7 +446,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           };
         }
       } catch (err: any) {
-        logToAI(`❌ Falha de conexão durante tráfego OpenZiti: ${err.message || err}`);
+        logToAI(`❌ Connection error during OpenZiti transit: ${err.message || err}`);
         
         newLedgerItem = {
           id: ledgerId,
@@ -375,18 +458,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           status: 'FAILED',
           securityCheck: 'PASSED',
           zitiSecured: false,
-          logs: [...itemLogs, `[Erro] ${err.message || err}`],
+          logs: [...itemLogs, `[Error] ${err.message || err}`],
           payload: signedPayload,
         };
       }
     }
 
-    setLedger((prev) => {
-      const next = [newLedgerItem, ...prev];
-      localStorage.setItem('zt-ledger', JSON.stringify(next));
-      return next;
-    });
-
+    setLedger((prev) => [newLedgerItem, ...prev]);
     return newLedgerItem;
   };
 
@@ -416,7 +494,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 export const useSimulation = () => {
   const context = useContext(SimulationContext);
   if (!context) {
-    throw new Error('useSimulation deve ser usado dentro de um SimulationProvider');
+    throw new Error('useSimulation must be used within a SimulationProvider');
   }
   return context;
 };
