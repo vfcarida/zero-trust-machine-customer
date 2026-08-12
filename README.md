@@ -1,124 +1,118 @@
 # Zero-Trust Machine Customer 🤖🔒
 
-This repository contains a production-grade Proof of Concept (PoC) for an autonomous transactional ecosystem based on **Machine-to-Machine (M2M)** payments and Zero-Trust network architectures. 
+[![Enterprise CI/CD](https://github.com/vfcarida/zero-trust-machine-customer/actions/workflows/ci.yml/badge.svg)](https://github.com/vfcarida/zero-trust-machine-customer/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![NIST Compliance](https://img.shields.io/badge/NIST-SP%20800--207%20%7C%20SP%20800--204-blue)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
+[![OWASP Agentic Top 10](https://img.shields.io/badge/OWASP-Agentic%20Top%2010-red)](https://owasp.org/)
 
-The application simulates edge-native autonomous procurement. An edge AI agent (Gemma 4 E2B) monitors hardware telemetry levels, makes procurement decisions, constructs and cryptographically signs **Mastercard AP4M (x402 protocol)** payment payloads, subjects them to a local **Wallet Guard Mode** compliance firewall, and transmits them over a software-defined **OpenZiti** Zero-Trust overlay network.
+An enterprise-grade, production-hardened platform for **Autonomous AI Machine Customers** operating within a rigorous **Zero Trust Architecture (ZTA)** and **Non-Human Identity (NHI)** governance model.
 
----
-
-## 🚀 Architectural Blueprint
-
-The application is built on **Next.js 16 (App Router)** and utilizes an offline-first resilient architecture. Below is the transaction lifecycle flow:
-
-```mermaid
-graph TD
-    subgraph Client [Machine Customer Client / Browser]
-        A[Hardware Telemetry: Compute/Coolant] -->|Level < 20%| B[Local Gemma 4 E2B Engine]
-        B -->|1. Reason with think| C[x402 JSON Payload Generated]
-        C -->|2. Delegated Key Signing| D[Cryptographically Signed Payload]
-        D -->|3. Local Wallet Guard Mode Firewall| E{Compliance Checks}
-        E -->|Rejected| F[Blocked Ledger Entry]
-        E -->|Approved| G[Send to API Boundary]
-    end
-    subgraph Edge_Mesh [Zero-Trust OpenZiti Overlay Network]
-        G -->|4. Post Request| H[Next.js API Gateway Route]
-        H -->|5. Validate Signature Defense-in-Depth| I{Signature Verified?}
-        I -->|Invalid| J[Reject 401 Unauthorized]
-        I -->|Valid| K[OpenZiti Outbound Dark Socket Tunnel]
-        K -->|6. Mutual TLS Handshake| L[OpenZiti Edge Controller]
-        K -->|7. AES-256-GCM End-to-End Encrypted Tunnel| M[Target Mesh Service ap4m-settlement]
-    end
-    subgraph Acquirer_Server [Dark Target Host / No Ingress Ports]
-        M -->|8. Settlement Processing| N[Merchant Acquirer Ledger]
-        N -->|9. Settlement Receipt / Auth Code| M
-        M -->|10. Response Payload| K
-        K -->|11. Success Response| H
-        H -->|12. Transaction Logged| O[Local Ledger Storage]
-    end
-```
-
-### Flow Execution Breakdown:
-1. **Hardware Telemetry Monitor**: Operation resources (cloud compute cores and coolant fluid) steadily deplete over time.
-2. **AI Decision Engine (Gemma 4 E2B)**: When resources hit a critical threshold (< 20%), a local LLM prompt is executed. Using structured reasoning chain thoughts (`<|think|>`), it determines the optimal replenishment amount and creates the purchase JSON payload.
-3. **Wallet Guard Mode Firewall**: The payload is intercepted and evaluated against daily spending limits and allowed vendor rules (similar to delegated agent wallets like MetaMask Agent Wallet).
-4. **Zero-Trust Secure Transit (OpenZiti)**: Approved transactions are posted to the Next.js backend, which initializes an outbound cryptographically secured mTLS session with the OpenZiti network. It resolves the dark target service `ap4m-settlement-service` with no inbound open ports on the host firewalls, preventing key leaks and network scanners.
+The platform simulates edge-native procurement. An autonomous AI agent monitors hardware compute/coolant telemetry, reasons over replenishment needs, generates and cryptographically signs **Mastercard AP4M (x402 protocol)** payment payloads, subjects them to a dynamic **Policy-as-Code (OPA / Rego)** kernel, and transmits them over a dark **OpenZiti** software-defined overlay network.
 
 ---
 
-## ✨ Core Innovations
+## 🚀 Key Innovations & Security Architecture
 
-* **Local AI Execution & Reasoning**: Visualizes the prompt config injected to Gemma E2B alongside a real-time logical reasoning terminal capturing `<|think|>` tokens.
-* **x402 M2M Payment Protocol**: Encodes transactions in micro-cents (`ucents`) using Mastercard AP4M standard structures with RSA-2048 signing keys.
-* **Resilient Offline Storage**: Uses robust serialization and safe parsing to prevent corrupted browser data from crashing the dashboard.
-* **Race Condition Protection**: Employs synchronized queue locks to process concurrent transactions, protecting budgets from duplicate spend race conditions.
-* **OpenZiti Overlay Topology**: Dynamic network status board visualizing PKI handshakes, mTLS status, and secure transmission events.
-* **Cryptographic Ledger**: Complete audit ledger logs showing transaction hashes, authorization codes, and network transport details.
+* **Clean Architecture & SOLID Design**: Strict layer separation (`Domain`, `Application`, `Infrastructure`, `Presentation`) with Zod I/O schema validation and SIEM JSON logging.
+* **Non-Human Identity (NHI) & RFC 8693 Token Exchange**: Ephemeral, audience-bound access tokens supporting nested delegation chains (`Human -> Machine Agent -> API`) via `act` claims.
+* **DPoP (RFC 9449) Proof-of-Possession**: Cryptographically binds access tokens to localized agent key pairs, eliminating stolen-token re-use attacks.
+* **SPIFFE/SPIRE Workload Identity**: Automated X.509 SVID acquisition for microservice identity attestation and mTLS mesh transit (NIST SP 800-204).
+* **Dynamic Policy-as-Code (OPA / Rego)**: Delegates every action and spend check to Open Policy Agent rules rather than hardcoded checks.
+* **OWASP Agentic Safety & Taint Tracking**: Encapsulates external inputs into `Trusted Metadata Envelopes`. Tainted inputs trigger a Human-in-the-Loop (HITL) pause requirement for high-risk operations.
+* **Model Context Protocol (MCP) Integration**: Native tool discovery and execution pipeline over OAuth 2.1 endpoints.
+* **OpenZiti Dark Socket Mesh**: Outbound dark tunnel execution with zero open inbound firewall ports.
 
 ---
 
-## 🏗️ Project Structure
+## 🏗️ Architecture Layer Structure
 
 ```text
 src/
-├── app/
-│   ├── api/transmit-ziti/    # OpenZiti client-server transit gateway route
-│   ├── ledger/               # Ledger audit ledger dashboard page
-│   ├── network/              # Overlay network routing topology page
-│   ├── security/             # Security compliance & wallet key managers page
-│   ├── globals.css           # Global Tailwind and visual tokens
-│   ├── layout.tsx            # Main layout wrapper
-│   └── page.tsx              # Simulator dashboard root entry point
-├── components/
-│   ├── layout/sidebar.tsx    # Responsive side navigation
-│   ├── MachineCustomerSimulator.tsx # Autopilot simulator interface controller
-│   └── ...
-├── hooks/
-│   └── use-simulation.tsx    # Simulation React Context orchestrating telemetry
-└── lib/
-    ├── agent_pay_protocol.ts # Mastercard AP4M x402 protocol and RSA signatures
-    ├── AgentGuardMode.ts     # Local wallet compliance rules and limits
-    ├── constants.ts          # Routes and approved supplier configurations
-    └── ziti_server.ts        # OpenZiti Node.js SDK connector and fallback simulator
+├── domain/                      # Core Business Entities & Value Objects
+│   ├── entities/                # Transaction, TaintEnvelope, NhiIdentity
+│   ├── errors/                  # Domain Exceptions (SecurityPolicyViolationError, etc.)
+│   ├── services/                # AgentReasoningService & Prompt Lifecycle
+│   └── types.ts                 # Zod Schemas & Immutable TypeScript Types
+├── application/                 # Orchestration & Tool Calling
+│   ├── kernel/                  # AgentKernel (Interception, Rate & Budget Quotas)
+│   ├── mcp/                     # MCP Tool Discovery Client
+│   └── use-cases/               # ExecuteMachinePurchaseUseCase, ExchangeTokenUseCase
+├── infrastructure/              # External Adapters & Cryptographic I/O
+│   ├── auth/                    # OAuth 2.1 (PKCE & RFC 8693), DPoP (RFC 9449), SPIFFE/SPIRE
+│   ├── authorization/           # OPA Client & machine_customer.rego policy
+│   ├── config/                  # Safe Environment Variable Loader (env.ts)
+│   ├── llm/                     # Provider-Agnostic LLM Adapter (LiteLLM, OpenAI, Gemma)
+│   └── logging/                 # Structured SIEM-Compatible JSON Logger
+├── app/                         # Next.js 16 App Router UI & API Gateway Routes
+└── test/                        # Comprehensive Vitest Testing Pyramid
+    ├── unit/                    # Unit Tests (AgentKernel, DPoP, OAuth2.1)
+    ├── adversarial/             # Red Teaming & Prompt Injection Attack Suites
+    └── integration/             # OPA Policy Resolution Tests
 ```
 
 ---
 
-## ⚙️ Installation & Running
+## ⚙️ Quickstart & Local Execution
 
 ### Prerequisites
 * **Node.js**: v20 or superior
 * **npm**: v10 or superior
 
 ### Running Locally
-1. Install project dependencies:
-   ```bash
-   npm install
-   ```
-2. Run development server:
-   ```bash
-   npm run dev
-   ```
-3. Open [http://localhost:3000](http://localhost:3000) in your web browser.
-
-### Running Automated Test Suite
-Run the full Vitest suite (including library unit tests, state management hooks integration tests, and API endpoint routing validation):
 ```bash
-npm test
-```
+# 1. Install dependencies
+npm install
 
-### Production Compilation
-Build a optimized static application bundle:
-```bash
-npm run build
+# 2. Start development server
+npm run dev
+
+# 3. Open browser at http://localhost:3000
 ```
 
 ---
 
-## 🛡️ Native OpenZiti Setup
+## 🧪 Testing Pyramid & Security Linting
 
-By default, the application runs in a **High-Fidelity Simulation Mode** to provide interactive logs. To run transactions over a live OpenZiti overlay network:
+Run the full Vitest suite (including Unit, Adversarial Prompt Injection, and OPA Integration tests):
 
-1. Deploy a local OpenZiti controller and edge router (e.g., via Docker quickstart).
-2. Register the machine customer client and the merchant endpoint identities, and map the `ap4m-settlement-service` routing.
-3. Complete client enrollment and save the resulting identity configuration file to `ziti-identity.json`.
-4. Place `ziti-identity.json` in the root folder of this project. The Next.js API route will automatically detect it and upgrade simulation traffic to native mTLS tunnels!
+```bash
+# Run all tests once
+npm test
+
+# Run tests with coverage report
+npm run test:coverage
+
+# Run ESLint static code analysis
+npm run lint
+```
+
+---
+
+## 🐳 Containerization & Cloud-Native Deployment
+
+### Docker Multi-Stage Hardened Container
+Build and run the non-root, hardened production image:
+
+```bash
+docker build -t zero-trust-machine-customer .
+docker run -p 3000:3000 zero-trust-machine-customer
+```
+
+### Local Multi-Container Setup (App + OPA)
+Launch local environment with Open Policy Agent container:
+
+```bash
+docker-compose up --build
+```
+
+### Kubernetes Manifest Deployment
+Deploy workloads with OPA & SPIRE sidecars and egress-only NetworkPolicies:
+
+```bash
+kubectl apply -f k8s/deployment.yaml
+```
+
+---
+
+## 📄 License & Credits
+Developed by **Vinicius Caridá**. Released under the [MIT License](LICENSE).

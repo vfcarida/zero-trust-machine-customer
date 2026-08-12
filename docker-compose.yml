@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  machine-customer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - OPA_SERVER_URL=http://opa:8181/v1/data/machine_customer/authz
+      - SPIFFE_ENDPOINT_SOCKET=unix:///tmp/spire-agent/public/api.sock
+    depends_on:
+      - opa
+    networks:
+      - zero-trust-mesh
+
+  opa:
+    image: openpolicyagent/opa:latest-envoy
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "/policies"
+    volumes:
+      - ./src/infrastructure/authorization/policies:/policies
+    networks:
+      - zero-trust-mesh
+
+networks:
+  zero-trust-mesh:
+    driver: bridge

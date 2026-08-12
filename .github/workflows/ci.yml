@@ -1,0 +1,66 @@
+name: Enterprise CI/CD & Supply Chain Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validate-and-test:
+    name: Code Quality, Testing & Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Execute ESLint Code Analysis
+        run: npm run lint
+
+      - name: Execute Vitest Suite & Coverage
+        run: npm test
+
+      - name: Vulnerability Audit
+        run: npm audit --audit-level=high
+
+  build-and-sign:
+    name: Container Build, SBOM & Cosign Signing
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Cosign Cryptographic Signer
+        uses: sigstore/cosign-installer@v3.4.0
+
+      - name: Install Syft SBOM Generator
+        uses: anchore/sbom-action/download-syft@v0.15.8
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate Software Bill of Materials (SBOM)
+        run: syft . -o spdx-json > sbom.spdx.json
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-artifact
+          path: sbom.spdx.json
+
+      - name: Build Production Container Image
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}:${{ github.sha }} .

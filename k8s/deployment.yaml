@@ -1,0 +1,116 @@
+# Kubernetes Orchestration Manifests (NIST SP 800-207 Workload Isolation)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zero-trust-machine-customer
+  namespace: machine-customer-system
+  labels:
+    app.kubernetes.io/name: zero-trust-machine-customer
+    app.kubernetes.io/component: machine-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: zero-trust-machine-customer
+  template:
+    metadata:
+      labels:
+        app: zero-trust-machine-customer
+    spec:
+      serviceAccountName: machine-customer-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        # Core Machine Customer Workload Container
+        - name: machine-customer-agent
+          image: ghcr.io/vfcarida/zero-trust-machine-customer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: OPA_SERVER_URL
+              value: "http://127.0.0.1:8181/v1/data/machine_customer/authz"
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/agent.sock"
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+
+        # Sidecar 1: Open Policy Agent (OPA) Policy Enforcement Engine
+        - name: opa-sidecar
+          image: openpolicyagent/opa:latest-envoy
+          args:
+            - "run"
+            - "--server"
+            - "--addr=127.0.0.1:8181"
+            - "/policies"
+          volumeMounts:
+            - name: opa-policy-volume
+              mountPath: /policies
+              readOnly: true
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+
+        # Sidecar 2: SPIRE Agent Workload Attestation Sidecar (SPIFFE X.509 SVID)
+        - name: spire-agent-sidecar
+          image: ghcr.io/spiffe/spire-agent:1.8.0
+          args:
+            - "-config"
+            - "/opt/spire/conf/agent/agent.conf"
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+
+      volumes:
+        - name: spire-agent-socket
+          emptyDir: {}
+        - name: opa-policy-volume
+          configMap:
+            name: opa-rego-policy-cm
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: machine-customer-sa
+  namespace: machine-customer-system
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: machine-customer-egress-only
+  namespace: machine-customer-system
+spec:
+  podSelector:
+    matchLabels:
+      app: zero-trust-machine-customer
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: [] # Block all inbound ingress traffic (Dark Host architecture)
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8443
