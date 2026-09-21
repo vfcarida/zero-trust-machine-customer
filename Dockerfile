@@ -5,7 +5,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-libc-dev --no-cache python3 make g++ git
+RUN apk add --no-cache python3 make g++ git
 
 COPY package*.json ./
 RUN npm ci

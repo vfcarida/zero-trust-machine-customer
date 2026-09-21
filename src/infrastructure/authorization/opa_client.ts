@@ -10,25 +10,107 @@ export interface OPAInputContext {
   actorSpiffeId?: string;
 }
 
+export type DecisionProvenance = 'opa' | 'embedded-dev';
+
 export interface OPADecisionResult {
   allow: boolean;
   reasons: string[];
   evaluatedAt: string;
+  provenance: DecisionProvenance;
 }
+
+export interface OPAClientOptions {
+  serverUrl?: string;
+  enforceStrict?: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
+export type OPAClientConfig = string | OPAClientOptions;
 
 /**
  * Open Policy Agent (OPA) Client Interface for Policy-as-Code Dynamic Authorization.
  * Evaluates contextual data against Rego policy engine rules for every tool invocation.
+ * Fails closed in strict mode when the OPA sidecar is unreachable.
  */
 export class OPAClient {
   private serverUrl: string;
+  private enforceStrict: boolean;
+  private timeoutMs: number;
+  private maxRetries: number;
 
-  constructor(serverUrl = 'http://localhost:8181/v1/data/machine_customer/authz') {
-    this.serverUrl = serverUrl;
+  constructor(config?: OPAClientConfig) {
+    if (typeof config === 'string') {
+      this.serverUrl = config;
+      this.enforceStrict = this.resolveDefaultStrictMode();
+      this.timeoutMs = 2000;
+      this.maxRetries = 1;
+    } else {
+      this.serverUrl =
+        config?.serverUrl ||
+        (typeof process !== 'undefined' && process.env.OPA_SERVER_URL) ||
+        'http://localhost:8181/v1/data/machine_customer/authz';
+      this.enforceStrict =
+        config?.enforceStrict !== undefined
+          ? config.enforceStrict
+          : this.resolveDefaultStrictMode();
+      this.timeoutMs = config?.timeoutMs ?? 2000;
+      this.maxRetries = config?.maxRetries ?? 1;
+    }
+  }
+
+  private resolveDefaultStrictMode(): boolean {
+    if (typeof process !== 'undefined' && process.env.OPA_ENFORCE_STRICT !== undefined) {
+      return process.env.OPA_ENFORCE_STRICT === 'true';
+    }
+    // Default to strict (fail-closed) in production / non-dev environments
+    return typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
+  }
+
+  public getEnforceStrict(): boolean {
+    return this.enforceStrict;
+  }
+
+  public getServerUrl(): string {
+    return this.serverUrl;
   }
 
   /**
-   * Evaluates an authorization decision dynamically via OPA Rego policy server with fallback evaluation logic.
+   * Internal HTTP POST fetch with AbortController timeout and bounded retries.
+   */
+  private async fetchWithTimeoutAndRetry(
+    url: string,
+    body: string,
+    timeoutMs: number,
+    maxRetries: number
+  ): Promise<Response> {
+    let lastError: any;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        return response;
+      } catch (err: any) {
+        clearTimeout(timer);
+        lastError = err;
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  /**
+   * Evaluates an authorization decision dynamically via OPA Rego policy server.
+   * Fail-closed: if OPA is unreachable in strict mode, returns an immediate deny.
    */
   public async evaluateAuthorization(context: OPAInputContext): Promise<OPADecisionResult> {
     logger.info('Evaluating Policy-as-Code Authorization via OPA', {
@@ -36,35 +118,84 @@ export class OPAClient {
       merchantId: context.transaction.merchantId,
       amountUcents: context.transaction.amountUcents,
       taintStatus: context.taintStatus,
+      strictMode: this.enforceStrict,
     });
 
     try {
       if (typeof fetch !== 'undefined') {
-        const response = await fetch(this.serverUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: context }),
-        });
+        const response = await this.fetchWithTimeoutAndRetry(
+          this.serverUrl,
+          JSON.stringify({ input: context }),
+          this.timeoutMs,
+          this.maxRetries
+        );
 
         if (response.ok) {
-          const data = (await response.json()) as { result?: { allow?: boolean; deny_reason?: string[] } };
+          const data = (await response.json()) as {
+            result?: { allow?: boolean; deny_reason?: string[] };
+          };
           if (data.result) {
-            return {
-              allow: Boolean(data.result.allow),
-              reasons: data.result.deny_reason || [],
+            const allow = Boolean(data.result.allow);
+            const reasons = data.result.deny_reason || [];
+            const result: OPADecisionResult = {
+              allow,
+              reasons,
               evaluatedAt: new Date().toISOString(),
+              provenance: 'opa',
             };
+
+            logger.info('OPA Policy Evaluation Succeeded', {
+              action: context.action,
+              allow: result.allow,
+              reasons: result.reasons,
+              provenance: result.provenance,
+            });
+
+            return result;
           }
+        } else {
+          logger.warn('OPA Server returned non-200 status', {
+            status: response.status,
+            statusText: response.statusText,
+          });
         }
       }
     } catch (err: any) {
-      logger.warn('OPA Server unreachable, utilizing embedded Rego policy engine fallback', {
+      logger.warn('OPA Server unreachable or request timed out', {
         error: err.message || err,
+        serverUrl: this.serverUrl,
+        strictMode: this.enforceStrict,
       });
     }
 
-    // Embedded Policy Fallback enforcing Rego semantics
-    return this.evaluateEmbeddedRego(context);
+    // Fail-closed enforcement in strict mode
+    if (this.enforceStrict) {
+      const failClosedDecision: OPADecisionResult = {
+        allow: false,
+        reasons: ['OPA_SERVER_UNREACHABLE_FAIL_CLOSED'],
+        evaluatedAt: new Date().toISOString(),
+        provenance: 'opa',
+      };
+
+      logger.error('OPA Policy Enforcement Failed Closed (Strict Mode)', {
+        action: context.action,
+        reasons: failClosedDecision.reasons,
+        provenance: failClosedDecision.provenance,
+      });
+
+      return failClosedDecision;
+    }
+
+    // Non-strict dev mode: fallback to embedded evaluator tagged with 'embedded-dev'
+    const embeddedDecision = this.evaluateEmbeddedRego(context);
+    logger.info('OPA Policy Fallback to Embedded Evaluator (Dev Mode)', {
+      action: context.action,
+      allow: embeddedDecision.allow,
+      reasons: embeddedDecision.reasons,
+      provenance: embeddedDecision.provenance,
+    });
+
+    return embeddedDecision;
   }
 
   private evaluateEmbeddedRego(context: OPAInputContext): OPADecisionResult {
@@ -96,6 +227,7 @@ export class OPAClient {
       allow,
       reasons,
       evaluatedAt: new Date().toISOString(),
+      provenance: 'embedded-dev',
     };
   }
 }

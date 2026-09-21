@@ -10,9 +10,11 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "jose": "^6.2.12",
     "lucide-react": "^1.14.0",
     "next": "16.2.6",
     "react": "19.2.4",

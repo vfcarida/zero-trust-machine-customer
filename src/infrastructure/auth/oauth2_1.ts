@@ -45,6 +45,10 @@ export class OAuth21Client {
   /**
    * Executes RFC 8693 Token Exchange to request ephemeral, audience-bound access tokens.
    * Encapsulates the actor (`act`) claim to preserve delegation chains: (Human User -> Machine Customer -> Downstream API).
+   *
+   * NOTE (ZTMC-T08): This is a simulated local exchange implementation for demonstration
+   * and unit testing. Outputs are explicitly labeled `simulated: true`. No external
+   * Authorization Server (AS) validates the subject token or enforces `may_act` policies.
    */
   public async performTokenExchange(
     request: TokenExchangeRequest,
@@ -55,11 +59,13 @@ export class OAuth21Client {
       throw new TokenExchangeError(`Invalid Token Exchange Request: ${validatedRequest.error.message}`);
     }
 
-    logger.info('Executing RFC 8693 Token Exchange', {
+    logger.info('Executing RFC 8693 Token Exchange (Simulated Local Dev)', {
       action: 'rfc8693_token_exchange',
       audience: request.audience,
       subjectToken: request.subjectToken.substring(0, 10) + '...',
       hasActorClaim: Boolean(delegatingActor),
+      simulated: true,
+      provenance: 'simulated-local-dev',
     });
 
     // Build nested actor claim chain
@@ -84,6 +90,10 @@ export class OAuth21Client {
       expiresIn: 300, // 5-minute ephemeral lifespan
       scope: request.scope || 'm2m:procurement:write',
       actor: actorChain,
+      simulated: true,
+      provenance: 'simulated-local-dev',
+      notes:
+        'RFC 8693 token exchange simulated locally without upstream Authorization Server (AS) validation. No may_act policy enforced by external AS.',
     };
   }
 }

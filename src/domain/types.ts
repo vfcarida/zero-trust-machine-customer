@@ -10,12 +10,13 @@ export type Ucents = z.infer<typeof UcentsSchema>;
  * Value Object: DPoP Proof details (RFC 9449)
  */
 export const DPoPProofSchema = z.object({
-  jti: z.string().uuid(),
+  jwt: z.string().min(1).optional(),
+  jti: z.string().min(1),
   htm: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']),
-  htu: z.string().url(),
+  htu: z.string().min(1),
   iat: z.number().int(),
   ath: z.string().optional(), // Access Token Hash
-  signature: z.string(),
+  signature: z.string().optional(),
   publicKeyJwk: z.record(z.unknown()),
 });
 export type DPoPProof = z.infer<typeof DPoPProofSchema>;
@@ -58,18 +59,45 @@ export const X402PayloadSchema = z.object({
   timestamp: z.string().datetime(),
   nonce: z.string().min(8),
   signature: z.string().min(1),
+  dpopProof: z.string().optional(),
 });
 export type X402Payload = z.infer<typeof X402PayloadSchema>;
 
 /**
+ * Entity: Payment Settlement Response (x402 / AP4M)
+ */
+export const X402SettlementResponseSchema = z.object({
+  success: z.boolean(),
+  transactionId: z.string(),
+  settledAmountUcents: UcentsSchema,
+  currency: z.string(),
+  merchantId: z.string(),
+  authCode: z.string(),
+  timestamp: z.string(),
+  zitiSecured: z.boolean(),
+  error: z.string().optional(),
+  idempotentReplay: z.boolean().optional(),
+  state: z.string().optional(),
+  compensationId: z.string().optional(),
+});
+export type X402SettlementResponse = z.infer<typeof X402SettlementResponseSchema>;
+
+/**
  * Entity: RFC 8693 OAuth 2.1 Token Exchange Request & Response
  */
-export const ActorClaimSchema = z.object({
-  sub: z.string(), // Machine Customer Agent ID or Service Principal
-  iss: z.string(), // Issuer
-  act: z.lazy(() => ActorClaimSchema).optional(), // Nested delegation chain (Human -> Machine Customer -> Downstream API)
-});
-export type ActorClaim = z.infer<typeof ActorClaimSchema>;
+export type ActorClaim = {
+  sub: string;
+  iss: string;
+  act?: ActorClaim;
+};
+
+export const ActorClaimSchema: z.ZodType<ActorClaim> = z.lazy(() =>
+  z.object({
+    sub: z.string(),
+    iss: z.string(),
+    act: ActorClaimSchema.optional(),
+  })
+);
 
 export const TokenExchangeRequestSchema = z.object({
   grantType: z.literal('urn:ietf:params:oauth:grant-type:token-exchange'),
@@ -92,6 +120,9 @@ export const TokenExchangeResponseSchema = z.object({
   expiresIn: z.number().int().positive(),
   scope: z.string(),
   actor: ActorClaimSchema.optional(),
+  simulated: z.boolean().optional(),
+  provenance: z.string().optional(),
+  notes: z.string().optional(),
 });
 export type TokenExchangeResponse = z.infer<typeof TokenExchangeResponseSchema>;
 
@@ -118,6 +149,6 @@ export const GuardSettingsSchema = z.object({
   enabled: z.boolean(),
   dailySpendLimitUcents: UcentsSchema,
   allowlist: z.array(z.string()),
-  maxRatePerMinute: z.number().int().positive().default(60),
+  maxRatePerMinute: z.number().int().positive().optional(),
 });
 export type GuardSettings = z.infer<typeof GuardSettingsSchema>;

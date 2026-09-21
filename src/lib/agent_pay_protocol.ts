@@ -1,35 +1,7 @@
 import crypto from 'crypto';
 
-/**
- * Interface representing the structure of the HTTP payload for the x402 protocol
- * used in Mastercard's Agent Pay for Machines (AP4M).
- */
-export interface X402Payload {
-  x402Version: string;
-  agentId: string;
-  merchantId: string;
-  intent: string;
-  amountUcents: number; // Value in micro-cents (1 USD = 1,000,000 ucents)
-  currency: string;
-  timestamp: string;
-  nonce: string;
-  signature: string; // Cryptographic signature of the serialized payload fields
-}
-
-/**
- * Interface representing the merchant's payment settlement response.
- */
-export interface X402SettlementResponse {
-  success: boolean;
-  transactionId: string;
-  settledAmountUcents: number;
-  currency: string;
-  merchantId: string;
-  authCode: string;
-  timestamp: string;
-  zitiSecured: boolean;
-  error?: string;
-}
+import { X402Payload, X402SettlementResponse } from '../domain/types';
+export type { X402Payload, X402SettlementResponse };
 
 /**
  * Validates the structure and content of an x402 payload.
@@ -119,42 +91,39 @@ export function serializePayload(payload: Omit<X402Payload, 'signature'>): strin
 
 /**
  * Signs an x402 payload cryptographically using the agent's private key.
- * Refactored to catch keys formats violations. Falls back to simulated signature 
- * only when cryptographic node configuration is missing or restricted.
+ * Enforces fail-closed semantics: throws on any signing error or invalid key.
  */
 export function signX402Payload(
   payloadWithoutSignature: Omit<X402Payload, 'signature'>,
   privateKeyPem: string
 ): string {
+  if (!privateKeyPem || typeof privateKeyPem !== 'string' || !privateKeyPem.trim()) {
+    throw new Error('Private key PEM is empty or undefined.');
+  }
   try {
-    if (!privateKeyPem) {
-      throw new Error('Private key PEM is empty or undefined.');
-    }
     const data = serializePayload(payloadWithoutSignature);
     const sign = crypto.createSign('SHA256');
     sign.update(data);
     sign.end();
     return sign.sign(privateKeyPem, 'base64');
   } catch (error: any) {
-    console.warn('Cryptographic signature failed, falling back to simulated signature:', error.message || error);
-    return `sim_sig_${crypto.randomBytes(16).toString('hex')}`;
+    console.error('Cryptographic signature generation failed:', error.message || error);
+    throw new Error(`Signing failed: ${error.message || error}`);
   }
 }
 
 /**
  * Verifies the cryptographic signature of the x402 payload using the agent's public key.
- * Handles both standard RSA-SHA256 signatures and development fallback signatures.
+ * Fail-closed: returns true strictly for a cryptographically valid RSA-SHA256 signature
+ * over the canonicalized payload matching the provided public key.
  */
 export function verifyX402Payload(payload: X402Payload, publicKeyPem: string): boolean {
   try {
-    if (!payload.signature) return false;
-    
-    // Check fallback simulated signature pattern
-    if (payload.signature.startsWith('sim_sig_')) {
-      return true;
+    if (!payload || !payload.signature || typeof payload.signature !== 'string' || !payload.signature.trim()) {
+      return false;
     }
 
-    if (!publicKeyPem) {
+    if (!publicKeyPem || typeof publicKeyPem !== 'string' || !publicKeyPem.trim()) {
       return false;
     }
 
@@ -169,14 +138,30 @@ export function verifyX402Payload(payload: X402Payload, publicKeyPem: string): b
   }
 }
 
+import { DPoPManager } from '../infrastructure/auth/dpop';
+import { DPoPProof } from '../domain/types';
+import { SettlementService, globalSettlementService } from '../application/services/settlement_service';
+
+export interface SettlementOptions {
+  dpopProof?: string | DPoPProof;
+  expectedMethod?: string;
+  expectedUrl?: string;
+  requireDPoP?: boolean;
+  dpopManager?: DPoPManager;
+  settlementService?: SettlementService;
+}
+
 /**
  * Simulates settlement processing on the vendor/acquirer side.
  * Validates cryptographic signature and enforces strict constraints before payout.
+ * Verifies RFC 9449 DPoP proof at the settlement boundary when present or required.
  */
 export async function processX402Settlement(
   payload: X402Payload,
   publicKeyPem: string,
-  zitiSecured: boolean
+  zitiSecured: boolean,
+  dpopProofOrOptions?: string | DPoPProof | SettlementOptions,
+  legacyOptions?: SettlementOptions
 ): Promise<X402SettlementResponse> {
   // 1. Enforce payload structural validation
   if (!validateX402PayloadStructure(payload)) {
@@ -209,18 +194,80 @@ export async function processX402Settlement(
     };
   }
 
-  // 3. Emulate network processing latency (300ms to 800ms)
-  await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500));
+  // 3. Resolve DPoP proof and settlement options
+  let dpopProofToVerify: string | DPoPProof | undefined;
+  let options: SettlementOptions = legacyOptions || {};
 
-  // 4. Return secure settlement authorization code
-  return {
-    success: true,
-    transactionId: `tx_${crypto.randomBytes(12).toString('hex')}`,
-    settledAmountUcents: payload.amountUcents,
-    currency: payload.currency,
-    merchantId: payload.merchantId,
-    authCode: Math.floor(100000 + Math.random() * 900000).toString(),
-    timestamp: new Date().toISOString(),
+  if (typeof dpopProofOrOptions === 'string') {
+    dpopProofToVerify = dpopProofOrOptions;
+  } else if (dpopProofOrOptions && typeof dpopProofOrOptions === 'object') {
+    if ('jwt' in dpopProofOrOptions || 'htm' in dpopProofOrOptions) {
+      dpopProofToVerify = dpopProofOrOptions as DPoPProof;
+    } else {
+      options = { ...options, ...(dpopProofOrOptions as SettlementOptions) };
+      dpopProofToVerify = options.dpopProof;
+    }
+  }
+
+  // Fallback to payload.dpopProof if not explicitly passed
+  if (!dpopProofToVerify && payload.dpopProof) {
+    dpopProofToVerify = payload.dpopProof;
+  }
+
+  // 4. Verify RFC 9449 DPoP Proof at the settlement boundary (defense-in-depth)
+  if (options.requireDPoP && !dpopProofToVerify) {
+    return {
+      success: false,
+      transactionId: `tx_err_${crypto.randomBytes(8).toString('hex')}`,
+      settledAmountUcents: 0,
+      currency: payload.currency,
+      merchantId: payload.merchantId,
+      authCode: '000000',
+      timestamp: new Date().toISOString(),
+      zitiSecured,
+      error: 'Missing RFC 9449 DPoP proof at settlement boundary (Proof-of-Possession Failure)',
+    };
+  }
+
+  if (dpopProofToVerify) {
+    const dpopManager = options.dpopManager || new DPoPManager();
+    const expectedMethod = options.expectedMethod || 'POST';
+    const expectedUrl = options.expectedUrl || 'http://localhost:3000/api/transmit-ziti';
+
+    const dpopResult = await dpopManager.verifyProofWithDetails(
+      dpopProofToVerify,
+      expectedMethod,
+      expectedUrl
+    );
+
+    if (!dpopResult.valid) {
+      return {
+        success: false,
+        transactionId: `tx_err_${crypto.randomBytes(8).toString('hex')}`,
+        settledAmountUcents: 0,
+        currency: payload.currency,
+        merchantId: payload.merchantId,
+        authCode: '000000',
+        timestamp: new Date().toISOString(),
+        zitiSecured,
+        error: `DPoP proof verification failed at settlement boundary: ${dpopResult.error || 'UNKNOWN_ERROR'}`,
+      };
+    }
+  }
+
+  // 5. Execute settlement lifecycle via SettlementService
+  // Enforces:
+  // - State machine transitions: PENDING -> AUTHORIZED -> SETTLING -> SETTLED | FAILED | COMPENSATED
+  // - Idempotency keyed on payment payload nonce
+  // - Daily budget quota against the single durable SpendLedger
+  // - Ambiguous outcome reconciliation and compensation
+  const settlementService = options.settlementService || globalSettlementService;
+  const settlementResult = await settlementService.processSettlement(
+    payload,
     zitiSecured,
-  };
+    typeof dpopProofToVerify === 'string' ? dpopProofToVerify : dpopProofToVerify?.jwt
+  );
+
+  return settlementResult;
 }
+

@@ -12,6 +12,8 @@ import {
   DEFAULT_GUARD_SETTINGS, 
   evaluateTransaction 
 } from '@/lib/AgentGuardMode';
+import { TaintEnvelopeTracker } from '@/domain/entities/taint_envelope';
+import { DPoPManager } from '@/infrastructure/auth/dpop';
 import { safeJsonParse } from '@/lib/utils';
 
 // Inventory resource interface definition
@@ -331,8 +333,15 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       nonce: Math.random().toString(36).substring(2, 15),
     };
 
-    logToAI(`📝 Formatting payload to Mastercard AP4M standard structure...`);
+    logToAI(`📝 Formatting payload to simulated AP4M/x402 JSON structure...`);
     await new Promise((r) => setTimeout(r, 300));
+
+    // Evaluate input provenance and wrap in Trusted Metadata Envelope
+    const envelope = TaintEnvelopeTracker.wrapPayload(
+      JSON.stringify(rawPayload),
+      `merchant_vendor:${res.merchantId}`
+    );
+    logToAI(`🛡️ Envelope Tracking: Provenance="${envelope.source}" | TaintStatus=${envelope.taintStatus} | RequiresHITL=${envelope.requiresHITL}`);
 
     // Sign payload
     const signature = signX402Payload(rawPayload, agentKeys?.privateKey || '');
@@ -370,6 +379,15 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     } else {
       logToAI(`✅ Guard Mode Verification: APPROVED. Daily limit and allowlist validations passed.`);
+      logToAI(`🛡️ Generating RFC 9449 Demonstrating Proof-of-Possession (DPoP) token...`);
+      
+      const dpopManager = new DPoPManager();
+      const dpopProof = dpopManager.generateProofSync(
+        'POST',
+        'http://localhost:3000/api/transmit-ziti'
+      );
+      logToAI(`🔑 DPoP Proof generated. JTI: ${dpopProof.jti.substring(0, 8)}..., Alg: ES256.`);
+
       logToAI(`🌐 Dispatching secure overlay transaction to OpenZiti Edge Router...`);
       await new Promise((r) => setTimeout(r, 300));
 
@@ -379,10 +397,12 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'DPoP': dpopProof.jwt,
           },
           body: JSON.stringify({
-            payload: signedPayload,
+            payload: { ...signedPayload, dpopProof: dpopProof.jwt },
             publicKey: agentKeys?.publicKey,
+            dpopProof: dpopProof.jwt,
           }),
         });
 
@@ -395,23 +415,27 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         if (response.ok && data.success && data.responsePayload.success) {
           const settlement: X402SettlementResponse = data.responsePayload;
-          logToAI(`🎉 Transaction settled successfully! Auth reference: ${settlement.authCode}.`);
-          
-          // Refill hardware resource level
-          const nextInventory = {
-            ...inventoryRef.current,
-            [resourceType]: {
-              ...inventoryRef.current[resourceType],
-              level: Math.min(100, inventoryRef.current[resourceType].level + 50), // Increment by 50% capacity
-            },
-          };
-          setInventory(nextInventory);
-          inventoryRef.current = nextInventory;
+          if (settlement.idempotentReplay) {
+            logToAI(`ℹ️ Idempotent replay detected for transaction ${settlement.transactionId}. Funds previously settled; spend counter preserved.`);
+          } else {
+            logToAI(`🎉 Transaction settled successfully! Auth reference: ${settlement.authCode}.`);
+            
+            // Refill hardware resource level
+            const nextInventory = {
+              ...inventoryRef.current,
+              [resourceType]: {
+                ...inventoryRef.current[resourceType],
+                level: Math.min(100, inventoryRef.current[resourceType].level + 50), // Increment by 50% capacity
+              },
+            };
+            setInventory(nextInventory);
+            inventoryRef.current = nextInventory;
 
-          // Increment daily spend synchronized counter
-          const nextDailySpend = dailySpendRef.current + amountUcents;
-          dailySpendRef.current = nextDailySpend;
-          setDailySpendUcents(nextDailySpend);
+            // Increment daily spend synchronized counter
+            const nextDailySpend = dailySpendRef.current + amountUcents;
+            dailySpendRef.current = nextDailySpend;
+            setDailySpendUcents(nextDailySpend);
+          }
 
           newLedgerItem = {
             id: ledgerId,

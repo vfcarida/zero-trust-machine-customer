@@ -1,6 +1,7 @@
 import { X402Payload, GuardSettings, TrustedMetadataEnvelope } from '../../domain/types';
 import { AgentKernelQuotaExceededError, SecurityPolicyViolationError } from '../../domain/errors/domain_errors';
 import { OPAClient, OPADecisionResult } from '../../infrastructure/authorization/opa_client';
+import { SpendLedger, InMemorySpendLedgerStore } from '../../domain/services/spend_ledger';
 import { logger } from '../../infrastructure/logging/logger';
 
 export interface KernelExecutionRequest {
@@ -20,24 +21,46 @@ export interface KernelExecutionResult {
 /**
  * AgentKernel: Structural Enforcement Layer & Execution Sandbox (OWASP Agentic Safety).
  * Intercepts requested actions, validates against cryptographic allowlists, and enforces strict rate & budget quotas.
+ * Replaces disconnected in-memory counter with the unified SpendLedger.
  */
 export class AgentKernel {
   private opaClient: OPAClient;
   private guardSettings: GuardSettings;
-  private currentDailySpendUcents = 0;
+  private spendLedger: SpendLedger;
   private actionTimestamps: number[] = [];
 
-  constructor(guardSettings: GuardSettings, opaClient?: OPAClient) {
+  constructor(guardSettings: GuardSettings, opaClient?: OPAClient, spendLedger?: SpendLedger) {
     this.guardSettings = guardSettings;
     this.opaClient = opaClient || new OPAClient();
+    this.spendLedger = spendLedger || new SpendLedger(new InMemorySpendLedgerStore());
+  }
+
+  public getSpendLedger(): SpendLedger {
+    return this.spendLedger;
   }
 
   public getDailySpend(): number {
-    return this.currentDailySpendUcents;
+    return this.spendLedger.getDailySpendUcentsSync();
+  }
+
+  public async getDailySpendAsync(): Promise<number> {
+    return await this.spendLedger.getDailySpendUcents();
   }
 
   public setDailySpend(spend: number): void {
-    this.currentDailySpendUcents = Math.max(0, spend);
+    this.spendLedger.clear();
+    if (spend > 0) {
+      this.spendLedger.saveTransaction({
+        id: `tx_kernel_init_${Date.now()}`,
+        nonce: `init_nonce_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        amountUcents: Math.max(0, spend),
+        merchantId: 'system',
+        currency: 'USD',
+        state: 'SETTLED',
+        timestamp: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
   }
 
   /**
@@ -53,19 +76,20 @@ export class AgentKernel {
 
     // 1. Enforce Rate Limiting Quota
     const now = Date.now();
-    this.actionTimestamps = this.actionTimestamps.filter((ts) => now - ts < 60000);
-    if (this.actionTimestamps.length >= this.guardSettings.maxRatePerMinute) {
+    const maxRate = this.guardSettings.maxRatePerMinute ?? 60;
+    if (this.actionTimestamps.length >= maxRate) {
       throw new AgentKernelQuotaExceededError(
-        `Rate limit exceeded: Maximum ${this.guardSettings.maxRatePerMinute} actions per minute allowed.`
+        `Rate limit exceeded: Maximum ${maxRate} actions per minute allowed.`
       );
     }
     this.actionTimestamps.push(now);
 
-    // 2. Evaluate Dynamic OPA Policy-as-Code
+    // 2. Evaluate Dynamic OPA Policy-as-Code against current daily spend from SpendLedger
+    const currentDailySpend = await this.spendLedger.getDailySpendUcents();
     const opaDecision = await this.opaClient.evaluateAuthorization({
       action: request.action,
       transaction: request.payload,
-      currentDailySpendUcents: this.currentDailySpendUcents,
+      currentDailySpendUcents: currentDailySpend,
       guardSettings: this.guardSettings,
       taintStatus: request.envelope.taintStatus,
       actorSpiffeId: request.actorSpiffeId,
@@ -90,8 +114,17 @@ export class AgentKernel {
       );
     }
 
-    // 3. Commit spend to state upon validation
-    this.currentDailySpendUcents += request.payload.amountUcents;
+    // 3. Commit spend to SpendLedger upon validation
+    await this.spendLedger.saveTransaction({
+      id: `tx_kernel_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      nonce: request.payload.nonce || `nonce_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      amountUcents: request.payload.amountUcents,
+      merchantId: request.payload.merchantId,
+      currency: request.payload.currency,
+      state: 'SETTLED',
+      timestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
     return {
       allowed: true,

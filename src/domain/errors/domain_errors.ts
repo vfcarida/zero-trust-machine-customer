@@ -50,3 +50,25 @@ export class AgentKernelQuotaExceededError extends DomainError {
     super(message, 'ERR_KERNEL_QUOTA_EXCEEDED');
   }
 }
+
+export class IllegalStateTransitionError extends DomainError {
+  constructor(fromState: string, toState: string, reason?: string) {
+    super(
+      `Illegal state transition attempted from "${fromState}" to "${toState}"${reason ? `: ${reason}` : ''}`,
+      'ERR_ILLEGAL_STATE_TRANSITION'
+    );
+  }
+}
+
+export class IdempotencyConflictError extends DomainError {
+  constructor(message: string) {
+    super(message, 'ERR_IDEMPOTENCY_CONFLICT');
+  }
+}
+
+export class AmbiguousSettlementError extends DomainError {
+  constructor(message: string) {
+    super(message, 'ERR_AMBIGUOUS_SETTLEMENT');
+  }
+}
+

@@ -1,10 +1,5 @@
-import type { X402Payload } from './agent_pay_protocol';
-
-export interface GuardSettings {
-  enabled: boolean;
-  dailySpendLimitUcents: number; // e.g., 50,000,000 ucents = $50.00 USD
-  allowlist: string[]; // e.g., ['aws_compute', 'partssource_corp', 'google_cloud_m2m']
-}
+import type { X402Payload, GuardSettings } from '../domain/types';
+export type { GuardSettings };
 
 export interface GuardCheckResult {
   approved: boolean;

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { globalSettlementService } from '../application/services/settlement_service';
 
 // Dynamic server-side import of the native OpenZiti C++ SDK node module
 let zitiSdk: any = null;
@@ -196,24 +197,23 @@ async function runZitiSimulation(
     logs.push(`[${new Date().toISOString()}] ${step.log}`);
   }
 
-  // Simulate remote settlement processing
+  // Simulate remote settlement processing via SettlementService lifecycle
   const latency = Date.now() - startTime;
-  logs.push(`[${new Date().toISOString()}] 📥 Settlement API responded with HTTP 200 (Success) via OpenZiti dark tunnel in ${latency}ms.`);
+  const settlement = await globalSettlementService.processSettlement(payload, true);
 
-  const mockResponse = {
-    success: true,
-    transactionId: `tx_ziti_${crypto.randomBytes(8).toString('hex')}`,
-    settledAmountUcents: payload.amountUcents,
-    currency: payload.currency || 'USD',
-    merchantId: payload.merchantId,
-    authCode: Math.floor(100000 + Math.random() * 900000).toString(),
-    timestamp: new Date().toISOString(),
-    zitiSecured: true,
-  };
+  if (settlement.idempotentReplay) {
+    logs.push(
+      `[${new Date().toISOString()}] ℹ️ Idempotent replay: settlement for nonce "${payload.nonce}" returned from durable ledger (${settlement.transactionId}).`
+    );
+  } else {
+    logs.push(
+      `[${new Date().toISOString()}] 📥 Settlement API responded with HTTP 200 (${settlement.state}) via OpenZiti dark tunnel in ${latency}ms.`
+    );
+  }
 
   return {
-    success: true,
+    success: settlement.success,
     logs,
-    responsePayload: mockResponse,
+    responsePayload: settlement,
   };
 }

@@ -1,53 +1,72 @@
 # Zero-Trust Machine Customer 🤖🔒
 
-[![Enterprise CI/CD](https://github.com/vfcarida/zero-trust-machine-customer/actions/workflows/ci.yml/badge.svg)](https://github.com/vfcarida/zero-trust-machine-customer/actions)
+> [!NOTE]
+> **Status Banner**: Educational single-page simulator of zero-trust and agentic-commerce concepts. The payment rail and OpenZiti transport are simulated; advanced identity controls are demonstrations, not enforced.
+
+[![Simulator Tests](https://github.com/vfcarida/zero-trust-machine-customer/actions/workflows/ci.yml/badge.svg)](https://github.com/vfcarida/zero-trust-machine-customer/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![NIST Compliance](https://img.shields.io/badge/NIST-SP%20800--207%20%7C%20SP%20800--204-blue)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![OWASP Agentic Top 10](https://img.shields.io/badge/OWASP-Agentic%20Top%2010-red)](https://owasp.org/)
+[![NIST Guidelines](https://img.shields.io/badge/NIST-SP%20800--207%20%7C%20SP%20800--204%20(Conceptual)-blue)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
+[![OWASP Agentic Alignment](https://img.shields.io/badge/OWASP-Agentic%20Top%2010%20(Demonstration)-red)](https://owasp.org/)
 
-An enterprise-grade, production-hardened platform for **Autonomous AI Machine Customers** operating within a rigorous **Zero Trust Architecture (ZTA)** and **Non-Human Identity (NHI)** governance model.
+An educational simulation platform for exploring **Autonomous AI Machine Customers** operating under **Zero Trust Architecture (ZTA)** and **Non-Human Identity (NHI)** principles.
 
-The platform simulates edge-native procurement. An autonomous AI agent monitors hardware compute/coolant telemetry, reasons over replenishment needs, generates and cryptographically signs **Mastercard AP4M (x402 protocol)** payment payloads, subjects them to a dynamic **Policy-as-Code (OPA / Rego)** kernel, and transmits them over a dark **OpenZiti** software-defined overlay network.
-
----
-
-## 🚀 Key Innovations & Security Architecture
-
-* **Clean Architecture & SOLID Design**: Strict layer separation (`Domain`, `Application`, `Infrastructure`, `Presentation`) with Zod I/O schema validation and SIEM JSON logging.
-* **Non-Human Identity (NHI) & RFC 8693 Token Exchange**: Ephemeral, audience-bound access tokens supporting nested delegation chains (`Human -> Machine Agent -> API`) via `act` claims.
-* **DPoP (RFC 9449) Proof-of-Possession**: Cryptographically binds access tokens to localized agent key pairs, eliminating stolen-token re-use attacks.
-* **SPIFFE/SPIRE Workload Identity**: Automated X.509 SVID acquisition for microservice identity attestation and mTLS mesh transit (NIST SP 800-204).
-* **Dynamic Policy-as-Code (OPA / Rego)**: Delegates every action and spend check to Open Policy Agent rules rather than hardcoded checks.
-* **OWASP Agentic Safety & Taint Tracking**: Encapsulates external inputs into `Trusted Metadata Envelopes`. Tainted inputs trigger a Human-in-the-Loop (HITL) pause requirement for high-risk operations.
-* **Model Context Protocol (MCP) Integration**: Native tool discovery and execution pipeline over OAuth 2.1 endpoints.
-* **OpenZiti Dark Socket Mesh**: Outbound dark tunnel execution with zero open inbound firewall ports.
+The platform simulates edge-native machine procurement. A browser-based AI agent simulator monitors simulated hardware compute/coolant telemetry, reasons over replenishment needs, generates and cryptographically signs a **bespoke JSON payment payload** (inspired by AP2 mandates and the x402 HTTP payment concept, but not a conformant Coinbase x402 or Mastercard Agent Pay implementation), evaluates wallet Guard Mode compliance, and transmits the transaction to an API route simulating dark **OpenZiti** overlay routing and vendor settlement.
 
 ---
 
-## 🏗️ Architecture Layer Structure
+## 🧭 Payment & Security Protocol Framing
+
+* **Payment Protocol**: The payment message is a **bespoke demonstration payload**, not an official or conformant Coinbase x402 protocol or Mastercard Agent Pay for Machines (AP4M) implementation. Real future targets would adhere to AP2 mandates or the emerging Coinbase x402 specification.
+* **Cryptographic Signing**: Uses genuine RSA-2048 keypair generation and canonical SHA-256 digital signatures with fail-closed verification (no bypasses).
+* **Transport**: OpenZiti transport operates in simulation mode with mock mesh routing; native `@openziti/ziti-sdk-nodejs` integration is optional and graceful.
+* **Identity Controls**: RFC 8693 token exchange, RFC 9449 DPoP proofs, and SPIFFE X.509 SVID generation exist as educational demonstration models and unit-tested components, not production-enforced network infrastructure.
+
+---
+
+## 🚀 Architecture & Key Demonstrations
+
+* **Local-First Simulation Loop**: Client-side state machine (`use-simulation.tsx`) modeling telemetry consumption, agent reasoning logs, signature generation, and Guard Mode evaluation.
+* **Zero-Trust Guard Mode**: Wallet-local firewall (`AgentGuardMode.ts`) enforcing rate limits, per-transaction caps, and merchant allowlists.
+* **Real Untrusted-Input Taint Tracking**: Boundary-aware provenance analysis (`TaintEnvelopeTracker`) classifying external merchant inputs, LLM outputs, and prompt injection signatures as `TAINTED`.
+* **Fail-Closed Cryptographic Verification**: Strict RSA-SHA256 signature checking (`agent_pay_protocol.ts`) rejecting forged, unsigned, or mismatched payment intents.
+* **Demonstration Identity & Policy Models**:
+  * **RFC 8693 Token Exchange**: Demonstrates actor claim (`act`) propagation across delegation chains (`oauth2_1.ts`).
+  * **RFC 9449 DPoP**: Demonstrates binding tokens to localized keypairs (`dpop.ts`).
+  * **SPIFFE/SPIRE**: Demonstrates workload identity concepts via synthetic X.509 SVID generation (`spiffe.ts`).
+  * **Policy-as-Code (OPA / Rego)**: Rego policy rules (`machine_customer.rego`) evaluated via `OpaClient` and `AgentKernel`.
+
+---
+
+## 🏗️ Clean Source Tree
 
 ```text
 src/
-├── domain/                      # Core Business Entities & Value Objects
-│   ├── entities/                # Transaction, TaintEnvelope, NhiIdentity
-│   ├── errors/                  # Domain Exceptions (SecurityPolicyViolationError, etc.)
-│   ├── services/                # AgentReasoningService & Prompt Lifecycle
-│   └── types.ts                 # Zod Schemas & Immutable TypeScript Types
-├── application/                 # Orchestration & Tool Calling
-│   ├── kernel/                  # AgentKernel (Interception, Rate & Budget Quotas)
-│   ├── mcp/                     # MCP Tool Discovery Client
-│   └── use-cases/               # ExecuteMachinePurchaseUseCase, ExchangeTokenUseCase
-├── infrastructure/              # External Adapters & Cryptographic I/O
-│   ├── auth/                    # OAuth 2.1 (PKCE & RFC 8693), DPoP (RFC 9449), SPIFFE/SPIRE
-│   ├── authorization/           # OPA Client & machine_customer.rego policy
-│   ├── config/                  # Safe Environment Variable Loader (env.ts)
-│   ├── llm/                     # Provider-Agnostic LLM Adapter (LiteLLM, OpenAI, Gemma)
-│   └── logging/                 # Structured SIEM-Compatible JSON Logger
 ├── app/                         # Next.js 16 App Router UI & API Gateway Routes
-└── test/                        # Comprehensive Vitest Testing Pyramid
-    ├── unit/                    # Unit Tests (AgentKernel, DPoP, OAuth2.1)
-    ├── adversarial/             # Red Teaming & Prompt Injection Attack Suites
-    └── integration/             # OPA Policy Resolution Tests
+│   ├── api/transmit-ziti/       # API Route verifying signatures & simulating settlement
+│   ├── ledger/                  # Transaction history ledger page
+│   ├── network/                 # OpenZiti overlay network visualization page
+│   ├── security/                # Guard Mode & policy configuration page
+│   └── page.tsx                 # Main simulator dashboard
+├── components/                  # React UI components (MachineCustomerSimulator, AppShell)
+├── domain/                      # Core Domain Entities & Schemas
+│   ├── entities/taint_envelope  # Boundary-aware Taint Tracking & Metadata Envelopes
+│   ├── errors/domain_errors     # Standardized domain error taxonomy
+│   └── types.ts                 # Zod schemas & TypeScript types
+├── application/                 # Enforcement Kernel
+│   └── kernel/agent_kernel.ts   # AgentKernel quota tracking & OPA policy enforcement
+├── infrastructure/              # Demonstrations & External Integration
+│   ├── auth/                    # OAuth 2.1 (RFC 8693), DPoP (RFC 9449), SPIFFE SVID
+│   ├── authorization/           # OPA Client & machine_customer.rego policy
+│   └── logging/logger.ts        # Structured SIEM-compatible JSON logger
+├── hooks/                       # useSimulation React hook driving live UI state
+├── lib/                         # Core Cryptographic & Protocol Utilities
+│   ├── agent_pay_protocol.ts    # RSA-2048 keygen, SHA-256 signing & fail-closed verify
+│   ├── AgentGuardMode.ts        # Wallet firewall & transaction evaluation rules
+│   └── ziti_server.ts           # OpenZiti mesh routing simulation
+└── test/                        # Vitest Test Suites
+    ├── unit/                    # Protocol, DPoP, OAuth, Taint, Kernel unit tests
+    ├── adversarial/             # Prompt injection & security red teaming tests
+    └── integration/             # OPA policy resolution tests
 ```
 
 ---
@@ -55,13 +74,13 @@ src/
 ## ⚙️ Quickstart & Local Execution
 
 ### Prerequisites
-* **Node.js**: v20 or superior
-* **npm**: v10 or superior
+* **Node.js**: v20 or higher
+* **npm**: v10 or higher
 
 ### Running Locally
 ```bash
 # 1. Install dependencies
-npm install
+npm ci
 
 # 2. Start development server
 npm run dev
@@ -71,48 +90,18 @@ npm run dev
 
 ---
 
-## 🧪 Testing Pyramid & Security Linting
-
-Run the full Vitest suite (including Unit, Adversarial Prompt Injection, and OPA Integration tests):
+## 🧪 Testing Pyramid & Static Verification
 
 ```bash
-# Run all tests once
-npm test
+# Run Vitest test suite
+npx vitest run --fileParallelism=false
 
-# Run tests with coverage report
-npm run test:coverage
+# Run TypeScript static type check
+npm run typecheck
 
-# Run ESLint static code analysis
+# Run Next.js production build
+npm run build
+
+# Run ESLint analysis
 npm run lint
 ```
-
----
-
-## 🐳 Containerization & Cloud-Native Deployment
-
-### Docker Multi-Stage Hardened Container
-Build and run the non-root, hardened production image:
-
-```bash
-docker build -t zero-trust-machine-customer .
-docker run -p 3000:3000 zero-trust-machine-customer
-```
-
-### Local Multi-Container Setup (App + OPA)
-Launch local environment with Open Policy Agent container:
-
-```bash
-docker-compose up --build
-```
-
-### Kubernetes Manifest Deployment
-Deploy workloads with OPA & SPIRE sidecars and egress-only NetworkPolicies:
-
-```bash
-kubectl apply -f k8s/deployment.yaml
-```
-
----
-
-## 📄 License & Credits
-Developed by **Vinicius Caridá**. Released under the [MIT License](LICENSE).

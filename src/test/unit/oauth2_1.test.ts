@@ -41,5 +41,10 @@ describe('OAuth 2.1 & RFC 8693 Token Exchange Handler', () => {
     expect(tokenResponse.tokenType).toBe('DPoP');
     expect(tokenResponse.actor).toBeDefined();
     expect(tokenResponse.actor?.act?.sub).toBe('usr_human_vinicius');
+
+    // ZTMC-T08: Assert transparent simulation labels
+    expect(tokenResponse.simulated).toBe(true);
+    expect(tokenResponse.provenance).toBe('simulated-local-dev');
+    expect(tokenResponse.notes).toContain('simulated locally');
   });
 });

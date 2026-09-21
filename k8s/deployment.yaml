@@ -109,6 +109,13 @@ spec:
     - Egress
   ingress: [] # Block all inbound ingress traffic (Dark Host architecture)
   egress:
+    # Allow DNS resolution (CoreDNS / cluster DNS)
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow outbound TLS traffic to authorized endpoints
     - ports:
         - protocol: TCP
           port: 443

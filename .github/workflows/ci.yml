@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
 jobs:
   validate-and-test:
     name: Code Quality, Testing & Security Audit
@@ -24,6 +27,9 @@ jobs:
       - name: Install Project Dependencies
         run: npm ci
 
+      - name: TypeScript Type Check
+        run: npm run typecheck
+
       - name: Execute ESLint Code Analysis
         run: npm run lint
 
@@ -38,6 +44,9 @@ jobs:
     needs: validate-and-test
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout Repository
@@ -55,11 +64,17 @@ jobs:
       - name: Generate Software Bill of Materials (SBOM)
         run: syft . -o spdx-json > sbom.spdx.json
 
-      - name: Upload SBOM Artifact
+      - name: Cryptographically Sign SBOM with Cosign (Keyless OIDC)
+        run: |
+          cosign sign-blob --yes --bundle sbom.spdx.json.bundle sbom.spdx.json
+
+      - name: Upload SBOM & Cryptographic Signature Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-artifact
-          path: sbom.spdx.json
+          name: sbom-and-signature
+          path: |
+            sbom.spdx.json
+            sbom.spdx.json.bundle
 
       - name: Build Production Container Image
         run: |
