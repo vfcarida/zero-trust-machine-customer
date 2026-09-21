@@ -38,13 +38,13 @@ describe('Agent Pay Protocol (AP4M / x402)', () => {
     });
 
     it('should reject payloads with missing keys', () => {
-      const invalid = { ...validBasePayload } as any;
+      const invalid: Record<string, unknown> = { ...validBasePayload };
       delete invalid.merchantId;
       expect(validateX402PayloadStructure(invalid)).toBe(false);
     });
 
     it('should reject payloads with incorrect data types', () => {
-      const invalid = { ...validBasePayload, amountUcents: '2500000' as any };
+      const invalid = { ...validBasePayload, amountUcents: '2500000' as unknown as number };
       expect(validateX402PayloadStructure(invalid)).toBe(false);
     });
   });
@@ -106,7 +106,7 @@ describe('Agent Pay Protocol (AP4M / x402)', () => {
         
         expect(verifyX402Payload(emptySigPayload, keys.publicKey)).toBe(false);
         expect(verifyX402Payload(whitespaceSigPayload, keys.publicKey)).toBe(false);
-        expect(verifyX402Payload({ ...validBasePayload } as any, keys.publicKey)).toBe(false);
+        expect(verifyX402Payload({ ...validBasePayload } as unknown as X402Payload, keys.publicKey)).toBe(false);
       });
 
       it('should reject a valid signature created for a different payload (mismatched payload / replay attack)', () => {
@@ -152,7 +152,7 @@ describe('Agent Pay Protocol (AP4M / x402)', () => {
     });
 
     it('should reject settlement for invalid payload structures', async () => {
-      const invalidPayload = { ...validBasePayload, amountUcents: -2500 } as any;
+      const invalidPayload = { ...validBasePayload, amountUcents: -2500 } as unknown as X402Payload;
       const settlement = await processX402Settlement(invalidPayload, 'some-key', false);
       expect(settlement.success).toBe(false);
       expect(settlement.error).toContain('Validation Failure');

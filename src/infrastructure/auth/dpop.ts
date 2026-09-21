@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import * as jose from 'jose';
-import { DPoPProof, DPoPProofSchema } from '../../domain/types';
-import { DPoPSignatureError } from '../../domain/errors/domain_errors';
+import { DPoPProof } from '../../domain/types';
 import { logger } from '../logging/logger';
 
 export interface DPoPKeyPair {
@@ -137,7 +136,7 @@ export class DPoPManager {
     }
 
     const exportedJwk = this.publicKeyObject.export({ format: 'jwk' });
-    delete (exportedJwk as any).d; // Ensure zero private key components
+    delete (exportedJwk as Record<string, unknown>).d; // Ensure zero private key components
     this.publicJwk = exportedJwk as Record<string, unknown>;
   }
 
@@ -385,11 +384,12 @@ export class DPoPManager {
         claims: payload as Record<string, unknown>,
         thumbprint,
       };
-    } catch (error: any) {
-      logger.warn('DPoP Signature verification failed', { error: error.message || error });
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.warn('DPoP Signature verification failed', { error: errMsg });
       return {
         valid: false,
-        error: `DPOP_VERIFICATION_FAILED: ${error.message || error}`,
+        error: `DPOP_VERIFICATION_FAILED: ${errMsg}`,
       };
     }
   }

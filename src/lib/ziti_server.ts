@@ -1,23 +1,42 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { createRequire } from 'module';
 import { globalSettlementService } from '../application/services/settlement_service';
+import { X402Payload } from '../domain/types';
 
 // Dynamic server-side import of the native OpenZiti C++ SDK node module
-let zitiSdk: any = null;
+interface ZitiSdkInterface {
+  init(path: string, cb: (err?: Error) => void): void;
+  httpRequest(
+    serviceName: string,
+    schemeHostPort: unknown,
+    method: string,
+    path: string,
+    headers: string[],
+    onReq: (req: unknown) => void,
+    onResp: (resp: { on(event: string, cb: (...args: unknown[]) => void): void }) => void,
+    onError: (err: Error) => void
+  ): void;
+  httpRequestData(req: unknown, data: string, cb: () => void): void;
+}
+
+let zitiSdk: ZitiSdkInterface | null = null;
 let isZitiSdkLoaded = false;
 
 if (typeof window === 'undefined') {
   try {
     // Hide module name in a variable so bundlers (e.g. Webpack) don't resolve it statically at build-time
     const zitiModuleName = '@openziti/ziti-sdk-nodejs';
-    zitiSdk = require(zitiModuleName);
+    const dynamicRequire = createRequire(import.meta.url);
+    zitiSdk = dynamicRequire(zitiModuleName) as ZitiSdkInterface;
     isZitiSdkLoaded = true;
     console.log('✅ Native Node.js OpenZiti SDK loaded successfully.');
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
     console.warn(
       '⚠️ Native OpenZiti SDK not loaded (running in high-fidelity sandbox/simulation mode). Reason:',
-      err.message || err
+      errorMsg
     );
   }
 }
@@ -25,7 +44,7 @@ if (typeof window === 'undefined') {
 export interface ZitiTransmissionResult {
   success: boolean;
   logs: string[];
-  responsePayload?: any;
+  responsePayload?: unknown;
   error?: string;
 }
 
@@ -34,7 +53,7 @@ export interface ZitiTransmissionResult {
  */
 export async function transmitPayloadOverZiti(
   serviceName: string,
-  payload: any,
+  payload: X402Payload | Record<string, unknown>,
   identityFilePath?: string
 ): Promise<ZitiTransmissionResult> {
   const logs: string[] = [];
@@ -50,14 +69,14 @@ export async function transmitPayloadOverZiti(
   logs.push(`[${new Date().toISOString()}] 🔍 Searching for Ziti identity profile at: "${resolvedPath}"`);
 
   const identityFileExists = fs.existsSync(resolvedPath);
-  const useRealZiti = isZitiSdkLoaded && identityFileExists;
+  const useRealZiti = isZitiSdkLoaded && identityFileExists && zitiSdk !== null;
 
-  if (useRealZiti) {
+  if (useRealZiti && zitiSdk) {
     logs.push(`[${new Date().toISOString()}] 🔑 Identity file verified. Initializing OpenZiti context...`);
     try {
       // 1. Initialize the Ziti SDK Context
       await new Promise<void>((resolve, reject) => {
-        zitiSdk.init(resolvedPath, (err: any) => {
+        zitiSdk!.init(resolvedPath, (err?: Error) => {
           if (err) {
             reject(err);
           } else {
@@ -76,32 +95,36 @@ export async function transmitPayloadOverZiti(
       logs.push(`[${new Date().toISOString()}] 🔒 Encrypting request payload using end-to-end encryption (AES-256-GCM)...`);
       
       const responseData = await new Promise<string>((resolve, reject) => {
-        zitiSdk.httpRequest(
+        zitiSdk!.httpRequest(
           serviceName,
           undefined, // schemeHostPort
           'POST',
           '/api/x402-settle',
           ['Content-Type: application/json', 'Accept: application/json'],
-          (req: any) => {
+          (req: unknown) => {
             // Write data payload directly into the overlay socket
             const body = JSON.stringify(payload);
-            zitiSdk.httpRequestData(req, body, () => {
+            zitiSdk!.httpRequestData(req, body, () => {
               logs.push(`[${new Date().toISOString()}] 🚀 Data packet transmitted successfully through the overlay network.`);
             });
           },
-          (resp: any) => {
-            let chunks: Buffer[] = [];
-            resp.on('data', (chunk: Buffer) => {
-              chunks.push(chunk);
+          (resp: { on(event: string, cb: (...args: unknown[]) => void): void }) => {
+            const chunks: Buffer[] = [];
+            resp.on('data', (chunk: unknown) => {
+              if (Buffer.isBuffer(chunk)) {
+                chunks.push(chunk);
+              } else if (typeof chunk === 'string') {
+                chunks.push(Buffer.from(chunk));
+              }
             });
             resp.on('end', () => {
               resolve(Buffer.concat(chunks).toString('utf8'));
             });
-            resp.on('error', (err: any) => {
+            resp.on('error', (err: unknown) => {
               reject(err);
             });
           },
-          (err: any) => {
+          (err: Error) => {
             reject(err);
           }
         );
@@ -111,7 +134,7 @@ export async function transmitPayloadOverZiti(
       logs.push(`[${new Date().toISOString()}] 📥 Secure response received from target endpoint in ${latency}ms.`);
       
       try {
-        const parsedResp = JSON.parse(responseData);
+        const parsedResp: unknown = JSON.parse(responseData);
         return {
           success: true,
           logs,
@@ -125,10 +148,11 @@ export async function transmitPayloadOverZiti(
         };
       }
 
-    } catch (err: any) {
-      logs.push(`[${new Date().toISOString()}] ❌ OpenZiti native error: ${err.message || err}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logs.push(`[${new Date().toISOString()}] ❌ OpenZiti native error: ${errMsg}`);
       logs.push(`[${new Date().toISOString()}] ⚠️ Redirecting to secure simulated network sandbox...`);
-      return runZitiSimulation(serviceName, payload, resolvedPath, logs, start);
+      return runZitiSimulation(serviceName, payload as X402Payload, resolvedPath, logs, start);
     }
   } else {
     // Log why fallback simulator was selected
@@ -139,7 +163,7 @@ export async function transmitPayloadOverZiti(
       logs.push(`[${new Date().toISOString()}] ℹ️ Cryptographic profile "ziti-identity.json" not found in root path.`);
     }
     logs.push(`[${new Date().toISOString()}] 🛠️ Initializing high-fidelity Zero-Trust network simulator...`);
-    return runZitiSimulation(serviceName, payload, resolvedPath, logs, start);
+    return runZitiSimulation(serviceName, payload as X402Payload, resolvedPath, logs, start);
   }
 }
 
@@ -148,8 +172,8 @@ export async function transmitPayloadOverZiti(
  */
 async function runZitiSimulation(
   serviceName: string,
-  payload: any,
-  resolvedPath: string,
+  payload: X402Payload,
+  _resolvedPath: string,
   logs: string[],
   startTime: number
 ): Promise<ZitiTransmissionResult> {

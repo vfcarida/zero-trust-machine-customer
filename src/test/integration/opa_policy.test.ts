@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OPAClient } from '../../infrastructure/authorization/opa_client';
 import { GuardSettings, X402Payload } from '../../domain/types';
 

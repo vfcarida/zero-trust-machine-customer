@@ -7,39 +7,40 @@ export type { X402Payload, X402SettlementResponse };
  * Validates the structure and content of an x402 payload.
  * Prevents injection attacks and integrity violations.
  */
-export function validateX402PayloadStructure(payload: any): boolean {
+export function validateX402PayloadStructure(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false;
+  const p = payload as Record<string, unknown>;
   
-  const requiredKeys: (keyof Omit<X402Payload, 'signature'>)[] = [
+  const requiredKeys = [
     'x402Version', 'agentId', 'merchantId', 'intent', 
     'amountUcents', 'currency', 'timestamp', 'nonce'
   ];
   
   for (const key of requiredKeys) {
-    if (payload[key] === undefined || payload[key] === null) {
+    if (p[key] === undefined || p[key] === null) {
       return false;
     }
   }
 
   // Ensure amount is a strictly positive, non-floating, non-NaN integer
   if (
-    typeof payload.amountUcents !== 'number' ||
-    isNaN(payload.amountUcents) ||
-    payload.amountUcents <= 0 ||
-    !Number.isInteger(payload.amountUcents)
+    typeof p.amountUcents !== 'number' ||
+    isNaN(p.amountUcents) ||
+    p.amountUcents <= 0 ||
+    !Number.isInteger(p.amountUcents)
   ) {
     return false;
   }
 
   // Basic string constraints validation
   if (
-    typeof payload.x402Version !== 'string' ||
-    typeof payload.agentId !== 'string' ||
-    typeof payload.merchantId !== 'string' ||
-    typeof payload.intent !== 'string' ||
-    typeof payload.currency !== 'string' ||
-    typeof payload.timestamp !== 'string' ||
-    typeof payload.nonce !== 'string'
+    typeof p.x402Version !== 'string' ||
+    typeof p.agentId !== 'string' ||
+    typeof p.merchantId !== 'string' ||
+    typeof p.intent !== 'string' ||
+    typeof p.currency !== 'string' ||
+    typeof p.timestamp !== 'string' ||
+    typeof p.nonce !== 'string'
   ) {
     return false;
   }
@@ -66,9 +67,10 @@ export function generateAgentKeyPair(): { publicKey: string; privateKey: string 
     });
 
     return { publicKey, privateKey };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
     console.error('Fatal error during cryptographic keypair generation:', error);
-    throw new Error(`Crypto keypair generation failed: ${error.message}`);
+    throw new Error(`Crypto keypair generation failed: ${msg}`);
   }
 }
 
@@ -106,9 +108,10 @@ export function signX402Payload(
     sign.update(data);
     sign.end();
     return sign.sign(privateKeyPem, 'base64');
-  } catch (error: any) {
-    console.error('Cryptographic signature generation failed:', error.message || error);
-    throw new Error(`Signing failed: ${error.message || error}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Cryptographic signature generation failed:', msg);
+    throw new Error(`Signing failed: ${msg}`);
   }
 }
 
@@ -132,8 +135,9 @@ export function verifyX402Payload(payload: X402Payload, publicKeyPem: string): b
     verify.update(data);
     verify.end();
     return verify.verify(publicKeyPem, payload.signature, 'base64');
-  } catch (error: any) {
-    console.error('Cryptographic signature verification failed:', error.message || error);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Cryptographic signature verification failed:', msg);
     return false;
   }
 }

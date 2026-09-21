@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { 
   X402Payload, 
   X402SettlementResponse, 
@@ -65,7 +65,7 @@ interface SimulationContextType {
 const SimulationContext = createContext<SimulationContextType | undefined>(undefined);
 
 export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mounted, setMounted] = useState(false);
+  const isHydratedRef = useRef(false);
   
   // 1. Core States
   const [inventory, setInventory] = useState<Record<'compute' | 'coolant', ResourceState>>({
@@ -102,7 +102,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Synchronization references to prevent race conditions during asynchronous state updates
   const dailySpendRef = useRef<number>(0);
   const inventoryRef = useRef<Record<'compute' | 'coolant', ResourceState>>(inventory);
-  const queueRef = useRef<(() => Promise<any>)[]>([]);
+  const queueRef = useRef<(() => Promise<unknown>)[]>([]);
   const queueProcessingRef = useRef<boolean>(false);
 
   // Synchronize state references
@@ -116,70 +116,72 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Offline-first safe storage bootstrap
   useEffect(() => {
-    setMounted(true);
-    
-    // Cryptographic delegation keys
-    const savedKeys = localStorage.getItem('zt-agent-keys');
-    if (savedKeys) {
-      const keys = safeJsonParse(savedKeys, null);
-      if (keys) {
-        setAgentKeys(keys);
+    queueMicrotask(() => {
+      // Cryptographic delegation keys
+      const savedKeys = localStorage.getItem('zt-agent-keys');
+      if (savedKeys) {
+        const keys = safeJsonParse(savedKeys, null);
+        if (keys) {
+          setAgentKeys(keys);
+        } else {
+          const keys = generateAgentKeyPair();
+          localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
+          setAgentKeys(keys);
+        }
       } else {
         const keys = generateAgentKeyPair();
         localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
         setAgentKeys(keys);
       }
-    } else {
-      const keys = generateAgentKeyPair();
-      localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
-      setAgentKeys(keys);
-    }
 
-    // Wallet Guard Mode settings
-    const savedSettings = localStorage.getItem('zt-guard-settings');
-    if (savedSettings) {
-      const settings = safeJsonParse<GuardSettings | null>(savedSettings, null);
-      if (settings) {
-        setGuardSettingsState(settings);
+      // Wallet Guard Mode settings
+      const savedSettings = localStorage.getItem('zt-guard-settings');
+      if (savedSettings) {
+        const settings = safeJsonParse<GuardSettings | null>(savedSettings, null);
+        if (settings) {
+          setGuardSettingsState(settings);
+        }
       }
-    }
 
-    // Ledger transactions list
-    const savedLedger = localStorage.getItem('zt-ledger');
-    if (savedLedger) {
-      const parsedLedger = safeJsonParse<LedgerItem[]>(savedLedger, []);
-      setLedger(parsedLedger);
-      
-      // Calculate today's spending limit compliance
-      const todayStr = new Date().toISOString().split('T')[0];
-      const todaySpend = parsedLedger
-        .filter((item) => item.status === 'SUCCESS' && item.timestamp.startsWith(todayStr))
-        .reduce((sum, item) => sum + item.amountUcents, 0);
-      setDailySpendUcents(todaySpend);
-      dailySpendRef.current = todaySpend;
-    }
-
-    // Inventory states
-    const savedInv = localStorage.getItem('zt-inventory');
-    if (savedInv) {
-      const parsedInv = safeJsonParse<Record<'compute' | 'coolant', ResourceState> | null>(savedInv, null);
-      if (parsedInv) {
-        setInventory(parsedInv);
-        inventoryRef.current = parsedInv;
+      // Ledger transactions list
+      const savedLedger = localStorage.getItem('zt-ledger');
+      if (savedLedger) {
+        const parsedLedger = safeJsonParse<LedgerItem[]>(savedLedger, []);
+        setLedger(parsedLedger);
+        
+        // Calculate today's spending limit compliance
+        const todayStr = new Date().toISOString().split('T')[0];
+        const todaySpend = parsedLedger
+          .filter((item) => item.status === 'SUCCESS' && item.timestamp.startsWith(todayStr))
+          .reduce((sum, item) => sum + item.amountUcents, 0);
+        setDailySpendUcents(todaySpend);
+        dailySpendRef.current = todaySpend;
       }
-    }
+
+      // Inventory states
+      const savedInv = localStorage.getItem('zt-inventory');
+      if (savedInv) {
+        const parsedInv = safeJsonParse<Record<'compute' | 'coolant', ResourceState> | null>(savedInv, null);
+        if (parsedInv) {
+          setInventory(parsedInv);
+          inventoryRef.current = parsedInv;
+        }
+      }
+
+      isHydratedRef.current = true;
+    });
   }, []);
 
   // Sync state modifications back to local storage cleanly inside side effect hooks (React Purity)
   useEffect(() => {
-    if (!mounted) return;
+    if (!isHydratedRef.current) return;
     localStorage.setItem('zt-inventory', JSON.stringify(inventory));
-  }, [inventory, mounted]);
+  }, [inventory]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!isHydratedRef.current) return;
     localStorage.setItem('zt-ledger', JSON.stringify(ledger));
-  }, [ledger, mounted]);
+  }, [ledger]);
 
   const setGuardSettings = (settings: GuardSettings) => {
     setGuardSettingsState(settings);
@@ -199,10 +201,256 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     localStorage.removeItem('zt-ledger');
   };
 
+  // Sequential task executor to prevent concurrent transaction budget race conditions
+  const runQueue = useCallback(async () => {
+    if (queueProcessingRef.current) return;
+    queueProcessingRef.current = true;
+    
+    while (queueRef.current.length > 0) {
+      const task = queueRef.current.shift();
+      if (task) {
+        try {
+          await task();
+        } catch (err) {
+          console.error('Queue task execution failure:', err);
+        }
+      }
+    }
+    
+    queueProcessingRef.current = false;
+  }, []);
+
+  /**
+   * Internal synchronized procurement execution.
+   */
+  const executeAIProcurement = useCallback(
+    async (
+      resourceType: 'compute' | 'coolant',
+      reasoning: string
+    ): Promise<LedgerItem> => {
+      const res = inventoryRef.current[resourceType];
+      const amountUcents = res.replenishQuantity * res.costPerUnitUcents;
+      const intent = `Autonomous purchase of ${res.replenishQuantity} ${res.unitName} for ${res.name}`;
+      const ledgerId = `item_${Date.now()}`;
+      const itemLogs: string[] = [];
+
+      setAiLogs([]);
+      const logToAI = (text: string) => {
+        itemLogs.push(`[Gemma E2B] ${text}`);
+        setAiLogs((prev) => [...prev, text]);
+      };
+
+      logToAI(`🧠 Spawning local Gemma 4 E2B engine (Edge-to-Browser)... Reasoning trigger: ${reasoning}`);
+      await new Promise((r) => setTimeout(r, 400));
+      logToAI(`📥 Loading telemetry context: { resource: "${res.name}", currentLevel: ${res.level.toFixed(1)}%, criticalBound: 20.0% }`);
+      await new Promise((r) => setTimeout(r, 400));
+      logToAI(`⚙️ Injecting System Prompt: "You are an autonomous Machine Customer Agent responsible for M2M procurement budget compliance. Decide purchase in x402 JSON format."`);
+      await new Promise((r) => setTimeout(r, 500));
+      logToAI(`🤔 Thinking (<|think|>): Telemetry matches depletion thresholds. Resolving merchant identity: "${res.merchantId}".`);
+      await new Promise((r) => setTimeout(r, 400));
+      logToAI(`📊 Calculating cost calculation: ${res.replenishQuantity} units * $${(res.costPerUnitUcents / 1000000).toFixed(2)} = $${(amountUcents / 1000000).toFixed(2)} USD.`);
+      await new Promise((r) => setTimeout(r, 400));
+      
+      // Create base x402 payment payload
+      const rawPayload: Omit<X402Payload, 'signature'> = {
+        x402Version: '1.0.0',
+        agentId: 'did:key:z6MkqB3zV18xPzT9m74H6eF8w4xY7tQ8rL2eD6jP3tS1vW',
+        merchantId: res.merchantId,
+        intent,
+        amountUcents,
+        currency: 'USD',
+        timestamp: new Date().toISOString(),
+        nonce: Math.random().toString(36).substring(2, 15),
+      };
+
+      logToAI(`📝 Formatting payload to simulated AP4M/x402 JSON structure...`);
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Evaluate input provenance and wrap in Trusted Metadata Envelope
+      const envelope = TaintEnvelopeTracker.wrapPayload(
+        JSON.stringify(rawPayload),
+        `merchant_vendor:${res.merchantId}`
+      );
+      logToAI(`🛡️ Envelope Tracking: Provenance="${envelope.source}" | TaintStatus=${envelope.taintStatus} | RequiresHITL=${envelope.requiresHITL}`);
+
+      // Sign payload
+      const signature = signX402Payload(rawPayload, agentKeys?.privateKey || '');
+      const signedPayload: X402Payload = { ...rawPayload, signature };
+      
+      logToAI(`🔑 Signing payload with RSA-2048 delegated agent wallet private key...`);
+      logToAI(`🖋️ Generated cryptographic signature: ${signature.substring(0, 24)}...`);
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Enforce Guard Mode compliance check
+      logToAI(`🛡️ Sending signed payload to wallet-local Guard Mode firewall...`);
+      await new Promise((r) => setTimeout(r, 400));
+
+      // Use synchronized ref for current spend to prevent race condition bypasses
+      const guardResult = evaluateTransaction(signedPayload, dailySpendRef.current, guardSettings);
+
+      let newLedgerItem: LedgerItem;
+
+      if (!guardResult.approved) {
+        logToAI(`❌ Guard Mode Alert: TRANSACTION REJECTED. Reason: ${guardResult.reason}`);
+        
+        newLedgerItem = {
+          id: ledgerId,
+          timestamp: new Date().toISOString(),
+          resource: resourceType,
+          merchantId: res.merchantId,
+          amountUcents,
+          intent,
+          status: 'BLOCKED',
+          securityCheck: 'FAILED',
+          securityReason: guardResult.reason,
+          zitiSecured: false,
+          logs: [...itemLogs],
+          payload: signedPayload,
+        };
+      } else {
+        logToAI(`✅ Guard Mode Verification: APPROVED. Daily limit and allowlist validations passed.`);
+        logToAI(`🛡️ Generating RFC 9449 Demonstrating Proof-of-Possession (DPoP) token...`);
+        
+        const dpopManager = new DPoPManager();
+        const dpopProof = dpopManager.generateProofSync(
+          'POST',
+          'http://localhost:3000/api/transmit-ziti'
+        );
+        logToAI(`🔑 DPoP Proof generated. JTI: ${dpopProof.jti.substring(0, 8)}..., Alg: ES256.`);
+
+        logToAI(`🌐 Dispatching secure overlay transaction to OpenZiti Edge Router...`);
+        await new Promise((r) => setTimeout(r, 300));
+
+        try {
+          // Post payload to Next.js API Route for server-side native tunneling
+          const response = await fetch('/api/transmit-ziti', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'DPoP': dpopProof.jwt,
+            },
+            body: JSON.stringify({
+              payload: { ...signedPayload, dpopProof: dpopProof.jwt },
+              publicKey: agentKeys?.publicKey,
+              dpopProof: dpopProof.jwt,
+            }),
+          });
+
+          const data = await response.json();
+          
+          // Append server-side Ziti tunnel events logs to agent log history
+          if (data.logs) {
+            data.logs.forEach((logLine: string) => itemLogs.push(logLine));
+          }
+
+          if (response.ok && data.success && data.responsePayload.success) {
+            const settlement: X402SettlementResponse = data.responsePayload;
+            if (settlement.idempotentReplay) {
+              logToAI(`ℹ️ Idempotent replay detected for transaction ${settlement.transactionId}. Funds previously settled; spend counter preserved.`);
+            } else {
+              logToAI(`🎉 Transaction settled successfully! Auth reference: ${settlement.authCode}.`);
+              
+              // Refill hardware resource level
+              const nextInventory = {
+                ...inventoryRef.current,
+                [resourceType]: {
+                  ...inventoryRef.current[resourceType],
+                  level: Math.min(100, inventoryRef.current[resourceType].level + 50), // Increment by 50% capacity
+                },
+              };
+              setInventory(nextInventory);
+              inventoryRef.current = nextInventory;
+
+              // Increment daily spend synchronized counter
+              const nextDailySpend = dailySpendRef.current + amountUcents;
+              dailySpendRef.current = nextDailySpend;
+              setDailySpendUcents(nextDailySpend);
+            }
+
+            newLedgerItem = {
+              id: ledgerId,
+              timestamp: new Date().toISOString(),
+              resource: resourceType,
+              merchantId: res.merchantId,
+              amountUcents,
+              intent,
+              status: 'SUCCESS',
+              securityCheck: 'PASSED',
+              zitiSecured: true,
+              transactionId: settlement.transactionId,
+              authCode: settlement.authCode,
+              logs: [...itemLogs],
+              payload: signedPayload,
+            };
+          } else {
+            logToAI(`❌ Settlement Processor Failure: ${data.error || 'Unknown processor error'}`);
+            
+            newLedgerItem = {
+              id: ledgerId,
+              timestamp: new Date().toISOString(),
+              resource: resourceType,
+              merchantId: res.merchantId,
+              amountUcents,
+              intent,
+              status: 'FAILED',
+              securityCheck: 'PASSED',
+              zitiSecured: false,
+              logs: [...itemLogs],
+              payload: signedPayload,
+            };
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logToAI(`❌ Connection error during OpenZiti transit: ${errMsg}`);
+          
+          newLedgerItem = {
+            id: ledgerId,
+            timestamp: new Date().toISOString(),
+            resource: resourceType,
+            merchantId: res.merchantId,
+            amountUcents,
+            intent,
+            status: 'FAILED',
+            securityCheck: 'PASSED',
+            zitiSecured: false,
+            logs: [...itemLogs, `[Error] ${errMsg}`],
+            payload: signedPayload,
+          };
+        }
+      }
+
+      setLedger((prev) => [newLedgerItem, ...prev]);
+      return newLedgerItem;
+    },
+    [agentKeys, guardSettings]
+  );
+
+  /**
+   * Enqueues and triggers the machine procurement pipeline: 
+   * Gemma model decision -> Payload generation -> Guard Mode compliance check -> OpenZiti routing.
+   */
+  const triggerAIProcurement = useCallback(
+    (
+      resourceType: 'compute' | 'coolant',
+      reasoning: string
+    ): Promise<LedgerItem> => {
+      return new Promise((resolve, reject) => {
+        queueRef.current.push(async () => {
+          try {
+            const item = await executeAIProcurement(resourceType, reasoning);
+            resolve(item);
+          } catch (err) {
+            reject(err);
+          }
+        });
+        runQueue();
+      });
+    },
+    [executeAIProcurement, runQueue]
+  );
+
   // Hardware depletion simulation loop (every 4 seconds)
   useEffect(() => {
-    if (!mounted) return;
-
     if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
       return;
     }
@@ -224,11 +472,11 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [mounted]);
+  }, []);
 
   // Autopilot loop: monitors critical depletion state (< 20%)
   useEffect(() => {
-    if (!mounted || isProcessing || !isAutopilot) return;
+    if (!isHydratedRef.current || isProcessing || !isAutopilot) return;
 
     const checkAndProcure = async () => {
       if (inventory.compute.level < 20 && !isProcessing) {
@@ -249,248 +497,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     checkAndProcure();
-  }, [inventory, isAutopilot, isProcessing, mounted]);
-
-  // Sequential task executor to prevent concurrent transaction budget race conditions
-  const runQueue = async () => {
-    if (queueProcessingRef.current) return;
-    queueProcessingRef.current = true;
-    
-    while (queueRef.current.length > 0) {
-      const task = queueRef.current.shift();
-      if (task) {
-        try {
-          await task();
-        } catch (err) {
-          console.error('Queue task execution failure:', err);
-        }
-      }
-    }
-    
-    queueProcessingRef.current = false;
-  };
-
-  /**
-   * Enqueues and triggers the machine procurement pipeline: 
-   * Gemma model decision -> Payload generation -> Guard Mode compliance check -> OpenZiti routing.
-   */
-  const triggerAIProcurement = (
-    resourceType: 'compute' | 'coolant',
-    reasoning: string
-  ): Promise<LedgerItem> => {
-    return new Promise((resolve, reject) => {
-      queueRef.current.push(async () => {
-        try {
-          const item = await executeAIProcurement(resourceType, reasoning);
-          resolve(item);
-        } catch (err) {
-          reject(err);
-        }
-      });
-      runQueue();
-    });
-  };
-
-  /**
-   * Internal synchronized procurement execution.
-   */
-  const executeAIProcurement = async (
-    resourceType: 'compute' | 'coolant',
-    reasoning: string
-  ): Promise<LedgerItem> => {
-    const res = inventoryRef.current[resourceType];
-    const amountUcents = res.replenishQuantity * res.costPerUnitUcents;
-    const intent = `Autonomous purchase of ${res.replenishQuantity} ${res.unitName} for ${res.name}`;
-    const ledgerId = `item_${Date.now()}`;
-    const itemLogs: string[] = [];
-
-    setAiLogs([]);
-    const logToAI = (text: string) => {
-      itemLogs.push(`[Gemma E2B] ${text}`);
-      setAiLogs((prev) => [...prev, text]);
-    };
-
-    logToAI(`🧠 Spawning local Gemma 4 E2B engine (Edge-to-Browser)...`);
-    await new Promise((r) => setTimeout(r, 400));
-    logToAI(`📥 Loading telemetry context: { resource: "${res.name}", currentLevel: ${res.level.toFixed(1)}%, criticalBound: 20.0% }`);
-    await new Promise((r) => setTimeout(r, 400));
-    logToAI(`⚙️ Injecting System Prompt: "You are an autonomous Machine Customer Agent responsible for M2M procurement budget compliance. Decide purchase in x402 JSON format."`);
-    await new Promise((r) => setTimeout(r, 500));
-    logToAI(`🤔 Thinking (<|think|>): Telemetry matches depletion thresholds. Resolving merchant identity: "${res.merchantId}".`);
-    await new Promise((r) => setTimeout(r, 400));
-    logToAI(`📊 Calculating cost calculation: ${res.replenishQuantity} units * $${(res.costPerUnitUcents / 1000000).toFixed(2)} = $${(amountUcents / 1000000).toFixed(2)} USD.`);
-    await new Promise((r) => setTimeout(r, 400));
-    
-    // Create base x402 payment payload
-    const rawPayload: Omit<X402Payload, 'signature'> = {
-      x402Version: '1.0.0',
-      agentId: 'did:key:z6MkqB3zV18xPzT9m74H6eF8w4xY7tQ8rL2eD6jP3tS1vW',
-      merchantId: res.merchantId,
-      intent,
-      amountUcents,
-      currency: 'USD',
-      timestamp: new Date().toISOString(),
-      nonce: Math.random().toString(36).substring(2, 15),
-    };
-
-    logToAI(`📝 Formatting payload to simulated AP4M/x402 JSON structure...`);
-    await new Promise((r) => setTimeout(r, 300));
-
-    // Evaluate input provenance and wrap in Trusted Metadata Envelope
-    const envelope = TaintEnvelopeTracker.wrapPayload(
-      JSON.stringify(rawPayload),
-      `merchant_vendor:${res.merchantId}`
-    );
-    logToAI(`🛡️ Envelope Tracking: Provenance="${envelope.source}" | TaintStatus=${envelope.taintStatus} | RequiresHITL=${envelope.requiresHITL}`);
-
-    // Sign payload
-    const signature = signX402Payload(rawPayload, agentKeys?.privateKey || '');
-    const signedPayload: X402Payload = { ...rawPayload, signature };
-    
-    logToAI(`🔑 Signing payload with RSA-2048 delegated agent wallet private key...`);
-    logToAI(`🖋️ Generated cryptographic signature: ${signature.substring(0, 24)}...`);
-    await new Promise((r) => setTimeout(r, 300));
-
-    // Enforce Guard Mode compliance check
-    logToAI(`🛡️ Sending signed payload to wallet-local Guard Mode firewall...`);
-    await new Promise((r) => setTimeout(r, 400));
-
-    // Use synchronized ref for current spend to prevent race condition bypasses
-    const guardResult = evaluateTransaction(signedPayload, dailySpendRef.current, guardSettings);
-
-    let newLedgerItem: LedgerItem;
-
-    if (!guardResult.approved) {
-      logToAI(`❌ Guard Mode Alert: TRANSACTION REJECTED. Reason: ${guardResult.reason}`);
-      
-      newLedgerItem = {
-        id: ledgerId,
-        timestamp: new Date().toISOString(),
-        resource: resourceType,
-        merchantId: res.merchantId,
-        amountUcents,
-        intent,
-        status: 'BLOCKED',
-        securityCheck: 'FAILED',
-        securityReason: guardResult.reason,
-        zitiSecured: false,
-        logs: [...itemLogs],
-        payload: signedPayload,
-      };
-    } else {
-      logToAI(`✅ Guard Mode Verification: APPROVED. Daily limit and allowlist validations passed.`);
-      logToAI(`🛡️ Generating RFC 9449 Demonstrating Proof-of-Possession (DPoP) token...`);
-      
-      const dpopManager = new DPoPManager();
-      const dpopProof = dpopManager.generateProofSync(
-        'POST',
-        'http://localhost:3000/api/transmit-ziti'
-      );
-      logToAI(`🔑 DPoP Proof generated. JTI: ${dpopProof.jti.substring(0, 8)}..., Alg: ES256.`);
-
-      logToAI(`🌐 Dispatching secure overlay transaction to OpenZiti Edge Router...`);
-      await new Promise((r) => setTimeout(r, 300));
-
-      try {
-        // Post payload to Next.js API Route for server-side native tunneling
-        const response = await fetch('/api/transmit-ziti', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'DPoP': dpopProof.jwt,
-          },
-          body: JSON.stringify({
-            payload: { ...signedPayload, dpopProof: dpopProof.jwt },
-            publicKey: agentKeys?.publicKey,
-            dpopProof: dpopProof.jwt,
-          }),
-        });
-
-        const data = await response.json();
-        
-        // Append server-side Ziti tunnel events logs to agent log history
-        if (data.logs) {
-          data.logs.forEach((logLine: string) => itemLogs.push(logLine));
-        }
-
-        if (response.ok && data.success && data.responsePayload.success) {
-          const settlement: X402SettlementResponse = data.responsePayload;
-          if (settlement.idempotentReplay) {
-            logToAI(`ℹ️ Idempotent replay detected for transaction ${settlement.transactionId}. Funds previously settled; spend counter preserved.`);
-          } else {
-            logToAI(`🎉 Transaction settled successfully! Auth reference: ${settlement.authCode}.`);
-            
-            // Refill hardware resource level
-            const nextInventory = {
-              ...inventoryRef.current,
-              [resourceType]: {
-                ...inventoryRef.current[resourceType],
-                level: Math.min(100, inventoryRef.current[resourceType].level + 50), // Increment by 50% capacity
-              },
-            };
-            setInventory(nextInventory);
-            inventoryRef.current = nextInventory;
-
-            // Increment daily spend synchronized counter
-            const nextDailySpend = dailySpendRef.current + amountUcents;
-            dailySpendRef.current = nextDailySpend;
-            setDailySpendUcents(nextDailySpend);
-          }
-
-          newLedgerItem = {
-            id: ledgerId,
-            timestamp: new Date().toISOString(),
-            resource: resourceType,
-            merchantId: res.merchantId,
-            amountUcents,
-            intent,
-            status: 'SUCCESS',
-            securityCheck: 'PASSED',
-            zitiSecured: true,
-            transactionId: settlement.transactionId,
-            authCode: settlement.authCode,
-            logs: [...itemLogs],
-            payload: signedPayload,
-          };
-        } else {
-          logToAI(`❌ Settlement Processor Failure: ${data.error || 'Unknown processor error'}`);
-          
-          newLedgerItem = {
-            id: ledgerId,
-            timestamp: new Date().toISOString(),
-            resource: resourceType,
-            merchantId: res.merchantId,
-            amountUcents,
-            intent,
-            status: 'FAILED',
-            securityCheck: 'PASSED',
-            zitiSecured: false,
-            logs: [...itemLogs],
-            payload: signedPayload,
-          };
-        }
-      } catch (err: any) {
-        logToAI(`❌ Connection error during OpenZiti transit: ${err.message || err}`);
-        
-        newLedgerItem = {
-          id: ledgerId,
-          timestamp: new Date().toISOString(),
-          resource: resourceType,
-          merchantId: res.merchantId,
-          amountUcents,
-          intent,
-          status: 'FAILED',
-          securityCheck: 'PASSED',
-          zitiSecured: false,
-          logs: [...itemLogs, `[Error] ${err.message || err}`],
-          payload: signedPayload,
-        };
-      }
-    }
-
-    setLedger((prev) => [newLedgerItem, ...prev]);
-    return newLedgerItem;
-  };
+  }, [inventory, isAutopilot, isProcessing, triggerAIProcurement]);
 
   return (
     <SimulationContext.Provider

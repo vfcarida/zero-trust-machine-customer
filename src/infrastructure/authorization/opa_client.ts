@@ -84,7 +84,7 @@ export class OPAClient {
     timeoutMs: number,
     maxRetries: number
   ): Promise<Response> {
-    let lastError: any;
+    let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -97,7 +97,7 @@ export class OPAClient {
         });
         clearTimeout(timer);
         return response;
-      } catch (err: any) {
+      } catch (err: unknown) {
         clearTimeout(timer);
         lastError = err;
         if (attempt < maxRetries) {
@@ -105,7 +105,7 @@ export class OPAClient {
         }
       }
     }
-    throw lastError;
+    throw (lastError instanceof Error ? lastError : new Error(String(lastError)));
   }
 
   /**
@@ -160,9 +160,10 @@ export class OPAClient {
           });
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       logger.warn('OPA Server unreachable or request timed out', {
-        error: err.message || err,
+        error: errMsg,
         serverUrl: this.serverUrl,
         strictMode: this.enforceStrict,
       });

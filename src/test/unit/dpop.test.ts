@@ -3,7 +3,6 @@ import * as jose from 'jose';
 import {
   DPoPManager,
   InMemoryDPoPReplayStore,
-  computeAccessTokenHash,
 } from '../../infrastructure/auth/dpop';
 
 describe('RFC 9449 DPoP Proof Manager (Suite E3: Adversarial & Replay Protection)', () => {
@@ -36,7 +35,7 @@ describe('RFC 9449 DPoP Proof Manager (Suite E3: Adversarial & Replay Protection
     expect(header.jwk?.y).toBeDefined();
 
     // RFC 9449 Section 4.2: MUST NOT contain private key components
-    expect((header.jwk as any).d).toBeUndefined();
+    expect((header.jwk as Record<string, unknown>).d).toBeUndefined();
   });
 
   it('(E3.2) should verify a valid DPoP proof successfully against embedded JWK', async () => {
@@ -132,7 +131,7 @@ describe('RFC 9449 DPoP Proof Manager (Suite E3: Adversarial & Replay Protection
 
   it('(E3.9) should reject JWK containing private key components (RFC 9449 Section 4.2)', async () => {
     // Generate an EC key and intentionally place the private component 'd' into the header JWK
-    const { publicKey, privateKey } = await jose.generateKeyPair('ES256', { extractable: true });
+    const { privateKey } = await jose.generateKeyPair('ES256', { extractable: true });
     const fullJwk = await jose.exportJWK(privateKey); // contains 'd'
 
     const maliciousJwt = await new jose.SignJWT({
