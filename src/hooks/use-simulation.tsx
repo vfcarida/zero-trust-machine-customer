@@ -13,6 +13,7 @@ import {
   evaluateTransaction 
 } from '@/lib/AgentGuardMode';
 import { defaultDecisionEngine } from '@/domain/services/agent_decision_engine';
+import { ThreatCategory } from '@/domain/entities/taint_envelope';
 import { DPoPManager } from '@/infrastructure/auth/dpop';
 import { safeJsonParse } from '@/lib/utils';
 
@@ -57,7 +58,15 @@ interface SimulationContextType {
   rotateKeys: () => void;
   isAutopilot: boolean;
   setIsAutopilot: (val: boolean) => void;
-  triggerAIProcurement: (resourceType: 'compute' | 'coolant', reasoning: string) => Promise<LedgerItem>;
+  triggerAIProcurement: (
+    resourceType: 'compute' | 'coolant',
+    reasoning?: string,
+    untrustedQuote?: string
+  ) => Promise<LedgerItem>;
+  triggerAdversarialAttack: (
+    category: ThreatCategory,
+    payloadSnippet: string
+  ) => Promise<LedgerItem>;
   isProcessing: boolean;
   aiLogs: string[];
 }
@@ -218,7 +227,8 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const executeAIProcurement = useCallback(
     async (
       resourceType: 'compute' | 'coolant',
-      reasoning: string
+      reasoning: string,
+      untrustedQuote?: string
     ): Promise<LedgerItem> => {
       const res = inventoryRef.current[resourceType];
       const decision = defaultDecisionEngine.evaluateProcurement({
@@ -232,6 +242,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         merchantId: res.merchantId,
         unitName: res.unitName,
         triggerReason: reasoning,
+        externalMerchantQuote: untrustedQuote,
       });
 
       const amountUcents = decision.amountUcents;
@@ -252,6 +263,52 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const rawPayload = decision.rawPayload;
       const envelope = decision.envelope;
+
+      // Fail-closed adversarial containment: halt before signing with private key
+      if (decision.threatAnalysis.isMalicious) {
+        logToAI(`🚨 ADVERSARIAL THREAT DETECTED: [${decision.threatAnalysis.threatCategories.join(', ')}] (Risk: ${decision.threatAnalysis.riskLevel})`);
+        logToAI(`🛑 Fail-Closed Enforcement: Untrusted boundary tainted. Aborting cryptographic wallet signing to prevent Confused Deputy execution.`);
+
+        try {
+          fetch('/api/audit-trail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'record_event',
+              eventType: 'ADVERSARIAL_ATTACK_DETECTED',
+              data: {
+                threatCategories: decision.threatAnalysis.threatCategories,
+                riskLevel: decision.threatAnalysis.riskLevel,
+                matchedPatterns: decision.threatAnalysis.matchedPatterns,
+                resource: resourceType,
+                merchantId: res.merchantId,
+                untrustedQuote: untrustedQuote?.substring(0, 120),
+                mitigation: 'FAIL_CLOSED_SIGNING_ABORTED',
+              },
+            }),
+          }).catch(() => {});
+        } catch {
+          // ignore
+        }
+
+        const blockedItem: LedgerItem = {
+          id: ledgerId,
+          timestamp: new Date().toISOString(),
+          resource: resourceType,
+          merchantId: res.merchantId,
+          amountUcents,
+          intent,
+          status: 'BLOCKED',
+          securityCheck: 'FAILED',
+          securityReason: `OWASP Agentic Threat Intercepted: [${decision.threatAnalysis.threatCategories.join(', ')}]`,
+          zitiSecured: false,
+          logs: [...itemLogs],
+          payload: { ...rawPayload, signature: 'BLOCKED_BY_GUARD' } as X402Payload,
+        };
+
+        setLedger((prev) => [blockedItem, ...prev]);
+        return blockedItem;
+      }
 
       // Resolve agent keys (fallback to on-demand generation if not yet bootstrapped)
       let activeKeys = agentKeysRef.current;
@@ -432,12 +489,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const triggerAIProcurement = useCallback(
     (
       resourceType: 'compute' | 'coolant',
-      reasoning: string
+      reasoning = 'Automated Telemetry Drain',
+      untrustedQuote?: string
     ): Promise<LedgerItem> => {
       return new Promise((resolve, reject) => {
         queueRef.current.push(async () => {
           try {
-            const item = await executeAIProcurement(resourceType, reasoning);
+            const item = await executeAIProcurement(resourceType, reasoning, untrustedQuote);
             resolve(item);
           } catch (err) {
             reject(err);
@@ -447,6 +505,20 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
     },
     [executeAIProcurement, runQueue]
+  );
+
+  const triggerAdversarialAttack = useCallback(
+    (
+      category: ThreatCategory,
+      payloadSnippet: string
+    ): Promise<LedgerItem> => {
+      return triggerAIProcurement(
+        'compute',
+        `Adversarial Simulation: Injecting OWASP Agentic threat [${category}]`,
+        payloadSnippet
+      );
+    },
+    [triggerAIProcurement]
   );
 
   // Hardware depletion simulation loop (every 4 seconds)
@@ -513,6 +585,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         isAutopilot,
         setIsAutopilot,
         triggerAIProcurement,
+        triggerAdversarialAttack,
         isProcessing,
         aiLogs,
       }}

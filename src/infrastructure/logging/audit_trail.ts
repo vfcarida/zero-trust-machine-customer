@@ -9,6 +9,7 @@ export type AuditEventType =
   | 'DPOP_PROOF_VERIFIED'
   | 'OPA_POLICY_EVAL'
   | 'TAINT_BOUNDARY_INTERCEPT'
+  | 'ADVERSARIAL_ATTACK_DETECTED'
   | 'SETTLEMENT_COMMENCED'
   | 'SETTLEMENT_FINALIZED'
   | 'SETTLEMENT_RECONCILED'
@@ -175,6 +176,21 @@ export class AuditTrailManager {
       isValid: true,
       totalRecords: this.chain.length,
     };
+  }
+
+  public getRecordCount(): number {
+    return this.chain.length;
+  }
+
+  /**
+   * Intentionally alters a historical record in-place to simulate tampering.
+   * Useful for security audits, automated integrity tests, and live demonstrations.
+   */
+  public simulateTamper(sequence: number, corruptedData: Record<string, unknown>): boolean {
+    const target = this.chain.find((r) => r.sequence === sequence);
+    if (!target) return false;
+    target.data = corruptedData;
+    return true;
   }
 
   public getHistory(): AuditRecord[] {

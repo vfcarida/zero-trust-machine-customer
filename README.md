@@ -121,8 +121,8 @@ In accordance with transparent engineering principles, every security control in
 | **CTL-04** | **Workload Identity (SPIFFE / SPIRE)**<br>`NIST SP 800-204A` | **SYNTHETIC**<br>*(Explicitly Labeled)* | **Synthetic Keypair**. Raw RSA-2048 SPKI public key (NOT an X.509 certificate). | Generates valid SPIFFE ID (`spiffe://zero-trust.machine.customer/workload/machine-customer-agent`) and ephemeral RSA keypairs. No local SPIRE Workload API daemon (`agent.sock`) is dialed in standalone mode. Outputs tagged `synthetic: true`. |
 | **CTL-05** | **Overlay Network (OpenZiti Dark Host)**<br>`NIST SP 800-207 §3.2` | **HYBRID** | **Driver Probe + Sandbox Fallback**. Outbound-only zero-trust ingress avoidance. | Probes for native `@openziti/ziti-sdk-nodejs` module. If available, dials service over encrypted Ziti overlay mesh. If uninstalled on dev host, executes high-fidelity simulated egress pipeline with structured trace logs. |
 | **CTL-06** | **Payment Settlement & Spend Ledger (x402 / AP4M)**<br>`HTTP 402 / AP4M Architecture` | **REAL STATE MACHINE** /<br>**PLUGGABLE RAIL** | **Fail-Closed**. Nonce idempotency, rolling spend limit enforcement, compensation. | Explicit 6-state transaction lifecycle (`PENDING`, `AUTHORIZED`, `SETTLING`, `SETTLED`, `FAILED`, `COMPENSATED`), durable PostgreSQL or file spend ledger, ambiguous outcome reconciliation and voiding. Dispatches via `HttpSettlementProvider` or `MockSettlementProvider`. |
-| **CTL-07** | **Tamper-Evident Audit Trail**<br>`NIST SP 800-207 §3.4` | **REAL** | **Cryptographic Verification**. SHA-256 hash chaining, Merkelized continuity checks, JSONL export. | Emits sequentially numbered audit records linking to predecessor hash (`previousHash`). Detects historical data tampering, record deletion, and sequence alteration via `verifyIntegrity()`. |
-| **CTL-08** | **AI Agent Decision Engine**<br>`OWASP Agentic ASI-01 / ASI-02` | **REAL** | **Boundary-Aware Taint & Injection Defense**. Multi-vector threat analysis across 6 categories. | Evaluates telemetry, generates CoT reasoning (`<|think|>`), checks 6 prompt injection vectors (instruction override, financial hijacking, prompt extraction, delimiter evasion, privilege escalation, data exfiltration), and wraps in `TrustedMetadataEnvelope`. |
+| **CTL-07** | **Tamper-Evident Audit Trail**<br>`NIST SP 800-207 §3.4` | **REAL** | **Cryptographic Verification & Live API**. SHA-256 hash chaining, NDJSON streaming, tamper detection. | Emits sequentially numbered audit records linking to predecessor hash (`previousHash`). Detects historical data tampering, record deletion, and sequence alteration via `verifyIntegrity()`. Exposes `/api/audit-trail` for NDJSON SIEM streaming. |
+| **CTL-08** | **AI Agent Decision Engine**<br>`OWASP Agentic ASI-01 / ASI-02` | **REAL** | **Boundary-Aware Taint & Injection Defense**. Multi-vector threat analysis across 6 categories. | Evaluates telemetry, generates CoT reasoning (`<|think|>`), checks 6 prompt injection vectors, wraps in `TrustedMetadataEnvelope`, and provides interactive prompt injection testbed in UI. |
 
 ---
 
@@ -133,8 +133,9 @@ The repository enforces strict separation of concerns following Domain-Driven De
 ```text
 src/
 ├── app/                                # Next.js 16 App Router UI & API Routes
+│   ├── api/audit-trail/                # Cryptographic audit trail API (NIST SP 800-207 §3.4, JSONL export)
 │   ├── api/transmit-ziti/              # Zero-Trust Ingress API verifying DPoP & RSA signatures
-│   ├── ledger/                         # Transaction history & audit ledger view
+│   ├── ledger/                         # Transaction spend ledger & tamper-evident audit dashboard
 │   ├── network/                        # OpenZiti overlay mesh topology visualization
 │   ├── security/                       # Guard Mode firewall configuration view
 │   └── page.tsx                        # Main Machine Customer interactive dashboard

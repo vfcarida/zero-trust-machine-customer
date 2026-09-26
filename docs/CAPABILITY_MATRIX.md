@@ -95,20 +95,22 @@ Every control is categorized into one of three operational states:
 - **Evidence**: `src/domain/services/settlement_state_machine.ts`, `src/infrastructure/storage/postgres_spend_ledger_store.ts`, `src/infrastructure/settlement/settlement_provider.ts`, tested in `src/test/unit/postgres_spend_ledger.test.ts` and `src/test/unit/http_settlement_provider.test.ts`.
 
 ### 3.7. Cryptographic Tamper-Evident Audit Trail (NIST SP 800-207 §3.4)
-- **Operational Reality**: **100% Real Cryptographic Hash Chain**.
+- **Operational Reality**: **100% Real Cryptographic Hash Chain & Live API**.
 - **Capabilities**:
   - Implements sequential SHA-256 hash chaining where every audit event incorporates the hash of its predecessor (`previousHash`).
   - Active runtime validation via `verifyIntegrity()`, detecting any retrospective record insertion, modification, deletion, or sequence alteration.
-  - Exports JSONL streams for automated SIEM ingestion.
-- **Evidence**: `src/infrastructure/logging/audit_trail.ts`, tested in `src/test/unit/audit_trail.test.ts`.
+  - Dedicated `/api/audit-trail` API route supporting on-demand verification, security event recording, and NDJSON streaming (`?format=jsonl`) for enterprise SIEM ingestion (Splunk, Elastic, Sentinel).
+  - Integrated in `src/app/ledger/page.tsx` with live SHA-256 chain verification and simulated tamper demonstration.
+- **Evidence**: `src/infrastructure/logging/audit_trail.ts`, `src/app/api/audit-trail/route.ts`, tested in `src/test/unit/audit_trail.test.ts` and `src/test/integration/audit_trail_api.test.ts`.
 
 ### 3.8. Autonomous Agent Decision Engine & Prompt Injection Defense (OWASP Agentic Top 10)
-- **Operational Reality**: **Real Heuristic Defense & Pure Domain Reasoning**.
+- **Operational Reality**: **Real Heuristic Defense & Pure Domain Reasoning with Interactive Testbed**.
 - **Capabilities**:
   - Decoupled CoT reasoning loop producing structured Gemma 4 E2B trace steps (`<|think|>`).
   - Multi-vector threat analysis across 6 distinct prompt injection classes: Direct Instruction Override, System Prompt Extraction, Privilege Escalation, Financial Hijacking, Delimiter Evasion, and Exfiltration.
-  - Automatic `CRITICAL` risk classification and `TAINTED` envelope tagging for adversarial payloads.
-- **Evidence**: `src/domain/services/agent_decision_engine.ts`, `src/domain/entities/taint_envelope.ts`, tested in `src/test/unit/agent_decision_engine.test.ts` and `src/test/adversarial/prompt_injection.test.ts`.
+  - Automatic `CRITICAL` risk classification, `TAINTED` envelope tagging, and fail-closed interception aborting wallet signing before private key invocation.
+  - Interactive Adversarial Prompt Injection Testbed in `src/components/MachineCustomerSimulator.tsx` with presets for OWASP Agentic threat vectors.
+- **Evidence**: `src/domain/services/agent_decision_engine.ts`, `src/domain/entities/taint_envelope.ts`, `src/components/MachineCustomerSimulator.tsx`, tested in `src/test/unit/agent_decision_engine.test.ts`, `src/test/adversarial/prompt_injection.test.ts`, and `src/hooks/use-simulation.test.tsx`.
 
 ---
 
