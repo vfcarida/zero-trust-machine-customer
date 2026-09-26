@@ -26,7 +26,9 @@ Every control is categorized into one of three operational states:
 | **CTL-03** | **Delegated Authority (RFC 8693 Token Exchange)**<br>`IETF RFC 8693` | **SIMULATED**<br>*(Explicitly Labeled)* | **Transparent Simulation**. Generates ephemeral DPoP-bound tokens and models `act` claims. | Local token minting utility. Models nested actor delegation chains (`Human User -> Machine Customer -> Downstream API`) and PKCE S256 verifiers. No external Authorization Server (AS) validates subject tokens or enforces `may_act`. Outputs tagged `simulated: true`. | • `src/infrastructure/auth/oauth2_1.ts`<br>• `src/domain/types.ts`<br>• `src/test/unit/oauth2_1.test.ts` |
 | **CTL-04** | **Workload Identity (SPIFFE / SPIRE)**<br>`NIST SP 800-204A` | **SYNTHETIC**<br>*(Explicitly Labeled)* | **Synthetic Keypair**. Raw RSA-2048 SPKI public key (NOT an X.509 certificate). | Generates valid SPIFFE ID (`spiffe://zero-trust.machine.customer/workload/machine-customer-agent`) and ephemeral RSA keypairs. No local SPIRE Workload API daemon (`agent.sock`) is dialed in standalone mode. Outputs tagged `synthetic: true`, `simulated: true`. | • `src/infrastructure/auth/spiffe.ts`<br>• `src/domain/types.ts`<br>• `src/test/unit/spiffe.test.ts` |
 | **CTL-05** | **Overlay Network (OpenZiti Dark Host)**<br>`NIST SP 800-207 §3.2` | **HYBRID** | **Driver Probe + Sandbox Fallback**. Outbound-only zero-trust ingress avoidance. | Probes for native `@openziti/ziti-sdk-nodejs` module. If available, dials service over encrypted Ziti overlay mesh. If uninstalled on dev host, executes high-fidelity simulated egress pipeline with structured trace logs. | • `src/lib/ziti_server.ts`<br>• `src/app/api/transmit-ziti/route.ts`<br>• `src/app/api/transmit-ziti/route.test.ts` |
-| **CTL-06** | **Payment Settlement & Ledger (x402 Protocol)**<br>`HTTP 402 / AP4M Architecture` | **REAL STATE MACHINE** /<br>**SIMULATED RAIL** | **Fail-Closed**. Nonce idempotency, rolling spend limit enforcement, compensation. | Explicit 6-state transaction lifecycle (`PENDING`, `AUTHORIZED`, `SETTLING`, `SETTLED`, `FAILED`, `COMPENSATED`), durable file/in-memory spend ledger, ambiguous outcome reconciliation/voiding. Payment rail executes against an internal mock simulator rather than live clearing banks. | • `src/domain/services/settlement_state_machine.ts`<br>• `src/domain/services/spend_ledger.ts`<br>• `src/application/services/settlement_service.ts`<br>• `src/test/integration/settlement_lifecycle.test.ts` |
+| **CTL-06** | **Payment Settlement & Ledger (x402 Protocol)**<br>`HTTP 402 / AP4M Architecture` | **REAL STATE MACHINE** /<br>**PLUGGABLE RAIL** | **Fail-Closed**. Nonce idempotency, rolling spend limit enforcement, compensation. | Explicit 6-state transaction lifecycle (`PENDING`, `AUTHORIZED`, `SETTLING`, `SETTLED`, `FAILED`, `COMPENSATED`), durable PostgreSQL or file spend ledger, ambiguous outcome reconciliation/voiding. Dispatches via `HttpSettlementProvider` or `MockSettlementProvider`. | • `src/domain/services/settlement_state_machine.ts`<br>• `src/infrastructure/storage/postgres_spend_ledger_store.ts`<br>• `src/infrastructure/settlement/settlement_provider.ts`<br>• `src/test/unit/postgres_spend_ledger.test.ts`<br>• `src/test/unit/http_settlement_provider.test.ts` |
+| **CTL-07** | **Tamper-Evident Audit Trail**<br>`NIST SP 800-207 §3.4` | **REAL** | **Cryptographic Verification**. SHA-256 hash chaining, Merkelized continuity checks, JSONL export. | Emits sequentially numbered audit records linking to predecessor hash (`previousHash`). Detects historical data tampering, record deletion, and sequence alteration via `verifyIntegrity()`. | • `src/infrastructure/logging/audit_trail.ts`<br>• `src/app/api/transmit-ziti/route.ts`<br>• `src/test/unit/audit_trail.test.ts` |
+| **CTL-08** | **AI Agent Decision Engine**<br>`OWASP Agentic ASI-01 / ASI-02` | **REAL** | **Boundary-Aware Taint & Injection Defense**. Multi-vector threat analysis across 6 categories. | Evaluates telemetry, generates CoT reasoning (`<|think|>`), checks 6 prompt injection vectors (instruction override, financial hijacking, prompt extraction, delimiter evasion, privilege escalation, data exfiltration), and wraps in `TrustedMetadataEnvelope`. | • `src/domain/services/agent_decision_engine.ts`<br>• `src/domain/entities/taint_envelope.ts`<br>• `src/test/unit/agent_decision_engine.test.ts`<br>• `src/test/adversarial/prompt_injection.test.ts` |
 
 ---
 
@@ -88,9 +90,25 @@ Every control is categorized into one of three operational states:
   - **Idempotency**: Requests are strictly keyed on the payment `nonce`. Replayed nonces return cached responses without re-executing or double-charging.
   - **Durable Spend Ledger**: Persists transaction records to disk (`.data/spend_ledger.json`), enforcing rolling 24-hour spending caps that survive application restarts.
   - **Ambiguous Outcomes**: Interrupted or timed-out settlements enter an ambiguous state and trigger automatic compensation/voiding routines.
-- **Limitations**:
-  - Clearing and settlement execute against an internal mock provider (`MockSettlementProvider`); no live card or bank networks are connected.
-- **Evidence**: `src/domain/services/settlement_state_machine.ts`, `src/domain/services/spend_ledger.ts`, `src/application/services/settlement_service.ts`, tested in `src/test/integration/settlement_lifecycle.test.ts`.
+  - **Pluggable Rails**: Supports both `MockSettlementProvider` and production `HttpSettlementProvider` with configurable gateway URLs, timeouts, and headers.
+  - **Distributed Persistence**: Supports both local `FileSpendLedgerStore` and enterprise `PostgresSpendLedgerStore` with parameterized queries.
+- **Evidence**: `src/domain/services/settlement_state_machine.ts`, `src/infrastructure/storage/postgres_spend_ledger_store.ts`, `src/infrastructure/settlement/settlement_provider.ts`, tested in `src/test/unit/postgres_spend_ledger.test.ts` and `src/test/unit/http_settlement_provider.test.ts`.
+
+### 3.7. Cryptographic Tamper-Evident Audit Trail (NIST SP 800-207 §3.4)
+- **Operational Reality**: **100% Real Cryptographic Hash Chain**.
+- **Capabilities**:
+  - Implements sequential SHA-256 hash chaining where every audit event incorporates the hash of its predecessor (`previousHash`).
+  - Active runtime validation via `verifyIntegrity()`, detecting any retrospective record insertion, modification, deletion, or sequence alteration.
+  - Exports JSONL streams for automated SIEM ingestion.
+- **Evidence**: `src/infrastructure/logging/audit_trail.ts`, tested in `src/test/unit/audit_trail.test.ts`.
+
+### 3.8. Autonomous Agent Decision Engine & Prompt Injection Defense (OWASP Agentic Top 10)
+- **Operational Reality**: **Real Heuristic Defense & Pure Domain Reasoning**.
+- **Capabilities**:
+  - Decoupled CoT reasoning loop producing structured Gemma 4 E2B trace steps (`<|think|>`).
+  - Multi-vector threat analysis across 6 distinct prompt injection classes: Direct Instruction Override, System Prompt Extraction, Privilege Escalation, Financial Hijacking, Delimiter Evasion, and Exfiltration.
+  - Automatic `CRITICAL` risk classification and `TAINTED` envelope tagging for adversarial payloads.
+- **Evidence**: `src/domain/services/agent_decision_engine.ts`, `src/domain/entities/taint_envelope.ts`, tested in `src/test/unit/agent_decision_engine.test.ts` and `src/test/adversarial/prompt_injection.test.ts`.
 
 ---
 

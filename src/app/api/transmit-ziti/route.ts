@@ -7,6 +7,7 @@ import { X402PayloadSchema, TaintStatus } from '@/domain/types';
 import { TaintEnvelopeTracker } from '@/domain/entities/taint_envelope';
 import { globalSettlementService } from '@/application/services/settlement_service';
 import { logger } from '@/infrastructure/logging/logger';
+import { globalAuditTrail } from '@/infrastructure/logging/audit_trail';
 
 const defaultSpendLedger = globalSettlementService.getSpendLedger();
 const routeDPoPManager = new DPoPManager();
@@ -136,6 +137,11 @@ export async function POST(req: Request) {
         jti: dpopResult.jti,
         thumbprint: dpopResult.thumbprint,
       });
+      globalAuditTrail.recordEvent(
+        'DPOP_PROOF_VERIFIED',
+        { jti: dpopResult.jti, thumbprint: dpopResult.thumbprint },
+        payload.agentId
+      );
     }
 
     // 3. Dynamic Policy-as-Code Authorization via OPA (fail-closed in strict mode)
@@ -174,6 +180,18 @@ export async function POST(req: Request) {
       guardSettings: effectiveGuardSettings,
       taintStatus: effectiveTaint,
     });
+
+    globalAuditTrail.recordEvent(
+      'OPA_POLICY_EVAL',
+      {
+        allow: opaDecision.allow,
+        reasons: opaDecision.reasons,
+        provenance: opaDecision.provenance,
+        taintStatus: effectiveTaint,
+        amountUcents: payload.amountUcents,
+      },
+      payload.agentId
+    );
 
     if (!opaDecision.allow) {
       logger.warn('API Gateway blocked transaction via OPA Policy-as-Code', {
@@ -214,6 +232,17 @@ export async function POST(req: Request) {
       durationMs: Date.now() - startTime,
       ...(txId ? { transactionId: txId } : {}),
     });
+
+    globalAuditTrail.recordEvent(
+      'SETTLEMENT_FINALIZED',
+      {
+        transactionId: txId,
+        merchantId: payload.merchantId,
+        amountUcents: payload.amountUcents,
+        durationMs: Date.now() - startTime,
+      },
+      payload.agentId
+    );
 
     return NextResponse.json({
       success: true,

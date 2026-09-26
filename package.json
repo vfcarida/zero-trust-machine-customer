@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint src",
     "test": "vitest run",
     "test:unit": "vitest run src/test/unit/",
     "test:integration": "vitest run src/test/integration/",

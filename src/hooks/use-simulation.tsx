@@ -12,7 +12,7 @@ import {
   DEFAULT_GUARD_SETTINGS, 
   evaluateTransaction 
 } from '@/lib/AgentGuardMode';
-import { TaintEnvelopeTracker } from '@/domain/entities/taint_envelope';
+import { defaultDecisionEngine } from '@/domain/services/agent_decision_engine';
 import { DPoPManager } from '@/infrastructure/auth/dpop';
 import { safeJsonParse } from '@/lib/utils';
 
@@ -221,8 +221,21 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       reasoning: string
     ): Promise<LedgerItem> => {
       const res = inventoryRef.current[resourceType];
-      const amountUcents = res.replenishQuantity * res.costPerUnitUcents;
-      const intent = `Autonomous purchase of ${res.replenishQuantity} ${res.unitName} for ${res.name}`;
+      const decision = defaultDecisionEngine.evaluateProcurement({
+        resourceType,
+        name: res.name,
+        currentLevel: res.level,
+        criticalThreshold: 20.0,
+        capacity: res.capacity,
+        costPerUnitUcents: res.costPerUnitUcents,
+        replenishQuantity: res.replenishQuantity,
+        merchantId: res.merchantId,
+        unitName: res.unitName,
+        triggerReason: reasoning,
+      });
+
+      const amountUcents = decision.amountUcents;
+      const intent = decision.intent;
       const ledgerId = `item_${Date.now()}`;
       const itemLogs: string[] = [];
 
@@ -232,38 +245,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setAiLogs((prev) => [...prev, text]);
       };
 
-      logToAI(`🧠 Spawning local Gemma 4 E2B engine (Edge-to-Browser)... Reasoning trigger: ${reasoning}`);
-      await new Promise((r) => setTimeout(r, 400));
-      logToAI(`📥 Loading telemetry context: { resource: "${res.name}", currentLevel: ${res.level.toFixed(1)}%, criticalBound: 20.0% }`);
-      await new Promise((r) => setTimeout(r, 400));
-      logToAI(`⚙️ Injecting System Prompt: "You are an autonomous Machine Customer Agent responsible for M2M procurement budget compliance. Decide purchase in x402 JSON format."`);
-      await new Promise((r) => setTimeout(r, 500));
-      logToAI(`🤔 Thinking (<|think|>): Telemetry matches depletion thresholds. Resolving merchant identity: "${res.merchantId}".`);
-      await new Promise((r) => setTimeout(r, 400));
-      logToAI(`📊 Calculating cost calculation: ${res.replenishQuantity} units * $${(res.costPerUnitUcents / 1000000).toFixed(2)} = $${(amountUcents / 1000000).toFixed(2)} USD.`);
-      await new Promise((r) => setTimeout(r, 400));
-      
-      // Create base x402 payment payload
-      const rawPayload: Omit<X402Payload, 'signature'> = {
-        x402Version: '1.0.0',
-        agentId: 'did:key:z6MkqB3zV18xPzT9m74H6eF8w4xY7tQ8rL2eD6jP3tS1vW',
-        merchantId: res.merchantId,
-        intent,
-        amountUcents,
-        currency: 'USD',
-        timestamp: new Date().toISOString(),
-        nonce: Math.random().toString(36).substring(2, 15),
-      };
+      for (const step of decision.reasoningSteps) {
+        logToAI(step.message);
+        await new Promise((r) => setTimeout(r, 400));
+      }
 
-      logToAI(`📝 Formatting payload to simulated AP4M/x402 JSON structure...`);
-      await new Promise((r) => setTimeout(r, 300));
-
-      // Evaluate input provenance and wrap in Trusted Metadata Envelope
-      const envelope = TaintEnvelopeTracker.wrapPayload(
-        JSON.stringify(rawPayload),
-        `merchant_vendor:${res.merchantId}`
-      );
-      logToAI(`🛡️ Envelope Tracking: Provenance="${envelope.source}" | TaintStatus=${envelope.taintStatus} | RequiresHITL=${envelope.requiresHITL}`);
+      const rawPayload = decision.rawPayload;
+      const envelope = decision.envelope;
 
       // Resolve agent keys (fallback to on-demand generation if not yet bootstrapped)
       let activeKeys = agentKeysRef.current;
