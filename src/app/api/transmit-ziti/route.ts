@@ -3,11 +3,44 @@ import { transmitPayloadOverZiti } from '@/lib/ziti_server';
 import { verifyX402Payload } from '@/lib/agent_pay_protocol';
 import { OPAClient } from '@/infrastructure/authorization/opa_client';
 import { DPoPManager } from '@/infrastructure/auth/dpop';
-import { X402PayloadSchema } from '@/domain/types';
-import { defaultSpendLedger } from '@/domain/services/spend_ledger';
+import { X402PayloadSchema, TaintStatus } from '@/domain/types';
+import { TaintEnvelopeTracker } from '@/domain/entities/taint_envelope';
+import { globalSettlementService } from '@/application/services/settlement_service';
 import { logger } from '@/infrastructure/logging/logger';
 
+const defaultSpendLedger = globalSettlementService.getSpendLedger();
 const routeDPoPManager = new DPoPManager();
+
+/**
+ * Resolves the canonical request URL for DPoP proof verification.
+ * Respects standard reverse proxy headers (X-Forwarded-Proto, X-Forwarded-Host)
+ * and falls back to req.url or localhost default.
+ */
+export function resolveExpectedUrl(req: Request): string {
+  try {
+    const proto = req.headers?.get?.('x-forwarded-proto') || 'http';
+    const forwardedHost = req.headers?.get?.('x-forwarded-host');
+    if (forwardedHost) {
+      let path = '/api/transmit-ziti';
+      try {
+        if (req.url) {
+          path = new URL(req.url).pathname;
+        }
+      } catch {
+        // use fallback path
+      }
+      return `${proto}://${forwardedHost}${path}`;
+    }
+
+    if (req.url) {
+      const parsed = new URL(req.url);
+      return `${parsed.origin}${parsed.pathname}`;
+    }
+  } catch {
+    // fallback
+  }
+  return 'http://localhost:3000/api/transmit-ziti';
+}
 
 export async function POST(req: Request) {
   const startTime = Date.now();
@@ -78,10 +111,11 @@ export async function POST(req: Request) {
       payload.dpopProof;
 
     if (dpopHeader) {
+      const expectedUrl = resolveExpectedUrl(req);
       const dpopResult = await routeDPoPManager.verifyProofWithDetails(
         dpopHeader,
         req.method || 'POST',
-        'http://localhost:3000/api/transmit-ziti'
+        expectedUrl
       );
 
       if (!dpopResult.valid) {
@@ -105,19 +139,40 @@ export async function POST(req: Request) {
     }
 
     // 3. Dynamic Policy-as-Code Authorization via OPA (fail-closed in strict mode)
+    // Resolve effective taint status (from client envelope, explicit field, or server boundary analysis)
+    let effectiveTaint: TaintStatus = 'UNTAINTED';
+    if (body.taintStatus && (body.taintStatus === 'TAINTED' || body.taintStatus === 'SANITIZED' || body.taintStatus === 'UNTAINTED')) {
+      effectiveTaint = body.taintStatus;
+    } else if (body.envelope?.taintStatus) {
+      effectiveTaint = body.envelope.taintStatus;
+    } else {
+      effectiveTaint = TaintEnvelopeTracker.deriveTaintStatus(payload.intent || '', `api_gateway:${payload.merchantId || 'unknown'}`);
+    }
+
     const currentDailySpend = await defaultSpendLedger.getDailySpendUcents();
     const opaClient = new OPAClient();
+    const effectiveGuardSettings = body.guardSettings && typeof body.guardSettings === 'object'
+      ? {
+          enabled: body.guardSettings.enabled ?? true,
+          dailySpendLimitUcents: body.guardSettings.dailySpendLimitUcents ?? 50000000,
+          allowlist: Array.isArray(body.guardSettings.allowlist)
+            ? body.guardSettings.allowlist
+            : ['aws_compute', 'partssource_corp', 'google_cloud_m2m', 'mcmaster_carr'],
+          maxRatePerMinute: body.guardSettings.maxRatePerMinute ?? 60,
+        }
+      : {
+          enabled: true,
+          dailySpendLimitUcents: 50000000,
+          allowlist: ['aws_compute', 'partssource_corp', 'google_cloud_m2m', 'mcmaster_carr'],
+          maxRatePerMinute: 60,
+        };
+
     const opaDecision = await opaClient.evaluateAuthorization({
       action: 'execute_transaction',
       transaction: payload,
       currentDailySpendUcents: currentDailySpend,
-      guardSettings: {
-        enabled: true,
-        dailySpendLimitUcents: 50000000,
-        allowlist: ['aws_compute', 'partssource_corp', 'google_cloud_m2m', 'mcmaster_carr'],
-        maxRatePerMinute: 60,
-      },
-      taintStatus: 'UNTAINTED',
+      guardSettings: effectiveGuardSettings,
+      taintStatus: effectiveTaint,
     });
 
     if (!opaDecision.allow) {
@@ -150,9 +205,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const txId =
+      zitiResult.responsePayload && typeof zitiResult.responsePayload === 'object' && 'transactionId' in zitiResult.responsePayload
+        ? (zitiResult.responsePayload as { transactionId?: string }).transactionId
+        : undefined;
+
     logger.info('API Gateway successfully processed Ziti transmission & settlement', {
       durationMs: Date.now() - startTime,
-      transactionId: zitiResult.responsePayload?.transactionId,
+      ...(txId ? { transactionId: txId } : {}),
     });
 
     return NextResponse.json({

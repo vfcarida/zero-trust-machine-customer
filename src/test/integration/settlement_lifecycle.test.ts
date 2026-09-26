@@ -8,8 +8,8 @@ import { SettlementStateMachine } from '../../domain/services/settlement_state_m
 import {
   SpendLedger,
   InMemorySpendLedgerStore,
-  FileSpendLedgerStore,
 } from '../../domain/services/spend_ledger';
+import { FileSpendLedgerStore } from '../../infrastructure/storage/file_spend_ledger_store';
 import { MockSettlementProvider } from '../../infrastructure/settlement/settlement_provider';
 import { IllegalStateTransitionError } from '../../domain/errors/domain_errors';
 import { AgentKernel } from '../../application/kernel/agent_kernel';

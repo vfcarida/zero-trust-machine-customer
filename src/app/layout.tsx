@@ -9,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Cliente Máquina Zero-Trust | PoC de Pagamentos M2M',
+  title: 'Zero-Trust Machine Customer | M2M Autonomous Settlement Platform',
   description:
-    'Prova de Conceito de Cliente Máquina Autônomo com conformidade Guard Mode e criptografia de rede overlay OpenZiti.',
+    'Autonomous Machine Customer reference architecture featuring Policy-as-Code Guard Mode, RFC 9449 DPoP, x402 payment settlements, and OpenZiti Zero-Trust overlay networking.',
 };
 
 export default function RootLayout({

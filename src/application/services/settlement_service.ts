@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { X402Payload, X402SettlementResponse } from '../../domain/types';
 import { SettlementStateMachine, TransactionState } from '../../domain/services/settlement_state_machine';
 import { SpendLedger, SpendRecord, defaultSpendLedgerStore } from '../../domain/services/spend_ledger';
+import { FileSpendLedgerStore } from '../../infrastructure/storage/file_spend_ledger_store';
 import {
   ISettlementProvider,
   MockSettlementProvider,
@@ -309,5 +310,7 @@ export class SettlementService {
   }
 }
 
-// Global default singleton settlement service
-export const globalSettlementService = new SettlementService();
+// Global default singleton settlement service backed by durable file spend ledger
+export const globalSettlementService = new SettlementService({
+  spendLedger: new SpendLedger(new FileSpendLedgerStore()),
+});

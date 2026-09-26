@@ -36,6 +36,9 @@ jobs:
       - name: Execute Vitest Suite & Coverage
         run: npm test
 
+      - name: Next.js Production Build
+        run: npm run build
+
       - name: Vulnerability Audit
         run: npm audit --audit-level=high
 

@@ -100,6 +100,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [aiLogs, setAiLogs] = useState<string[]>([]);
   
   // Synchronization references to prevent race conditions during asynchronous state updates
+  const agentKeysRef = useRef<{ publicKey: string; privateKey: string } | null>(null);
   const dailySpendRef = useRef<number>(0);
   const inventoryRef = useRef<Record<'compute' | 'coolant', ResourceState>>(inventory);
   const queueRef = useRef<(() => Promise<unknown>)[]>([]);
@@ -116,40 +117,37 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Offline-first safe storage bootstrap
   useEffect(() => {
+    // Cryptographic delegation keys
+    const savedKeys = localStorage.getItem('zt-agent-keys');
+    let loadedKeys: { publicKey: string; privateKey: string } | null = null;
+    if (savedKeys) {
+      loadedKeys = safeJsonParse<{ publicKey: string; privateKey: string } | null>(savedKeys, null);
+    }
+    if (!loadedKeys) {
+      loadedKeys = generateAgentKeyPair();
+      localStorage.setItem('zt-agent-keys', JSON.stringify(loadedKeys));
+    }
+    agentKeysRef.current = loadedKeys;
+
+    // Wallet Guard Mode settings
+    const savedSettings = localStorage.getItem('zt-guard-settings');
+    const settings = savedSettings ? safeJsonParse<GuardSettings | null>(savedSettings, null) : null;
+
+    // Ledger transactions list
+    const savedLedger = localStorage.getItem('zt-ledger');
+    const parsedLedger = savedLedger ? safeJsonParse<LedgerItem[]>(savedLedger, []) : null;
+
+    // Inventory states
+    const savedInv = localStorage.getItem('zt-inventory');
+    const parsedInv = savedInv ? safeJsonParse<Record<'compute' | 'coolant', ResourceState> | null>(savedInv, null) : null;
+
     queueMicrotask(() => {
-      // Cryptographic delegation keys
-      const savedKeys = localStorage.getItem('zt-agent-keys');
-      if (savedKeys) {
-        const keys = safeJsonParse(savedKeys, null);
-        if (keys) {
-          setAgentKeys(keys);
-        } else {
-          const keys = generateAgentKeyPair();
-          localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
-          setAgentKeys(keys);
-        }
-      } else {
-        const keys = generateAgentKeyPair();
-        localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
-        setAgentKeys(keys);
+      setAgentKeys(loadedKeys);
+      if (settings) {
+        setGuardSettingsState(settings);
       }
-
-      // Wallet Guard Mode settings
-      const savedSettings = localStorage.getItem('zt-guard-settings');
-      if (savedSettings) {
-        const settings = safeJsonParse<GuardSettings | null>(savedSettings, null);
-        if (settings) {
-          setGuardSettingsState(settings);
-        }
-      }
-
-      // Ledger transactions list
-      const savedLedger = localStorage.getItem('zt-ledger');
-      if (savedLedger) {
-        const parsedLedger = safeJsonParse<LedgerItem[]>(savedLedger, []);
+      if (parsedLedger) {
         setLedger(parsedLedger);
-        
-        // Calculate today's spending limit compliance
         const todayStr = new Date().toISOString().split('T')[0];
         const todaySpend = parsedLedger
           .filter((item) => item.status === 'SUCCESS' && item.timestamp.startsWith(todayStr))
@@ -157,17 +155,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setDailySpendUcents(todaySpend);
         dailySpendRef.current = todaySpend;
       }
-
-      // Inventory states
-      const savedInv = localStorage.getItem('zt-inventory');
-      if (savedInv) {
-        const parsedInv = safeJsonParse<Record<'compute' | 'coolant', ResourceState> | null>(savedInv, null);
-        if (parsedInv) {
-          setInventory(parsedInv);
-          inventoryRef.current = parsedInv;
-        }
+      if (parsedInv) {
+        setInventory(parsedInv);
+        inventoryRef.current = parsedInv;
       }
-
       isHydratedRef.current = true;
     });
   }, []);
@@ -190,6 +181,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const rotateKeys = () => {
     const keys = generateAgentKeyPair();
+    agentKeysRef.current = keys;
     setAgentKeys(keys);
     localStorage.setItem('zt-agent-keys', JSON.stringify(keys));
   };
@@ -273,8 +265,22 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       );
       logToAI(`🛡️ Envelope Tracking: Provenance="${envelope.source}" | TaintStatus=${envelope.taintStatus} | RequiresHITL=${envelope.requiresHITL}`);
 
+      // Resolve agent keys (fallback to on-demand generation if not yet bootstrapped)
+      let activeKeys = agentKeysRef.current;
+      if (!activeKeys) {
+        const savedKeys = localStorage.getItem('zt-agent-keys');
+        if (savedKeys) {
+          activeKeys = safeJsonParse<{ publicKey: string; privateKey: string } | null>(savedKeys, null);
+        }
+        if (!activeKeys) {
+          activeKeys = generateAgentKeyPair();
+          localStorage.setItem('zt-agent-keys', JSON.stringify(activeKeys));
+        }
+        agentKeysRef.current = activeKeys;
+      }
+
       // Sign payload
-      const signature = signX402Payload(rawPayload, agentKeys?.privateKey || '');
+      const signature = signX402Payload(rawPayload, activeKeys.privateKey);
       const signedPayload: X402Payload = { ...rawPayload, signature };
       
       logToAI(`🔑 Signing payload with RSA-2048 delegated agent wallet private key...`);
@@ -312,9 +318,13 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         logToAI(`🛡️ Generating RFC 9449 Demonstrating Proof-of-Possession (DPoP) token...`);
         
         const dpopManager = new DPoPManager();
+        const targetOrigin =
+          typeof window !== 'undefined' && window.location?.origin
+            ? window.location.origin
+            : 'http://localhost:3000';
         const dpopProof = dpopManager.generateProofSync(
           'POST',
-          'http://localhost:3000/api/transmit-ziti'
+          `${targetOrigin}/api/transmit-ziti`
         );
         logToAI(`🔑 DPoP Proof generated. JTI: ${dpopProof.jti.substring(0, 8)}..., Alg: ES256.`);
 
@@ -331,8 +341,10 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             },
             body: JSON.stringify({
               payload: { ...signedPayload, dpopProof: dpopProof.jwt },
-              publicKey: agentKeys?.publicKey,
+              publicKey: activeKeys.publicKey,
               dpopProof: dpopProof.jwt,
+              envelope,
+              guardSettings,
             }),
           });
 
@@ -422,7 +434,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setLedger((prev) => [newLedgerItem, ...prev]);
       return newLedgerItem;
     },
-    [agentKeys, guardSettings]
+    [guardSettings]
   );
 
   /**
@@ -483,7 +495,7 @@ export const SimulationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setIsProcessing(true);
         await triggerAIProcurement(
           'compute',
-          `Telemetria Crítica: Cloud processing capacity at ${inventory.compute.level.toFixed(1)}%. Triggering urgent Core allocation request.`
+          `Critical Telemetry: Cloud processing capacity at ${inventory.compute.level.toFixed(1)}%. Triggering urgent Core allocation request.`
         );
         setIsProcessing(false);
       } else if (inventory.coolant.level < 20 && !isProcessing) {

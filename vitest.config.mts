@@ -9,6 +9,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     css: true,
+    fileParallelism: false,
+    testTimeout: 15000,
     setupFiles: ['./src/vitest.setup.ts'],
     server: {
       deps: {

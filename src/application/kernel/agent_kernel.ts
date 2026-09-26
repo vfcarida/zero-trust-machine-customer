@@ -74,8 +74,11 @@ export class AgentKernel {
       taintStatus: request.envelope.taintStatus,
     });
 
-    // 1. Enforce Rate Limiting Quota
+    // 1. Enforce Rate Limiting Quota using a 60-second sliding window
     const now = Date.now();
+    const windowStart = now - 60000;
+    this.actionTimestamps = this.actionTimestamps.filter((ts) => ts > windowStart);
+
     const maxRate = this.guardSettings.maxRatePerMinute ?? 60;
     if (this.actionTimestamps.length >= maxRate) {
       throw new AgentKernelQuotaExceededError(

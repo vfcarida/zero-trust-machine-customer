@@ -5,9 +5,9 @@ import {
   serializePayload, 
   signX402Payload, 
   verifyX402Payload, 
-  processX402Settlement,
   X402Payload
 } from './agent_pay_protocol';
+import { processX402Settlement } from './agent_pay_server';
 import { DPoPManager, InMemoryDPoPReplayStore } from '../infrastructure/auth/dpop';
 
 describe('Agent Pay Protocol (AP4M / x402)', () => {

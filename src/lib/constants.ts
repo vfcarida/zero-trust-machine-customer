@@ -1,8 +1,8 @@
 // ============================================================================
-// Zero-Trust Machine Customer — Constantes da Aplicação
+// Zero-Trust Machine Customer — Application Constants
 // ============================================================================
 
-/** Definições de rotas de navegação. */
+/** Navigation route definitions. */
 export const ROUTES = {
   DASHBOARD: '/',
   SECURITY: '/security',
@@ -10,15 +10,15 @@ export const ROUTES = {
   LEDGER: '/ledger',
 } as const;
 
-/** Itens de navegação para o menu lateral. */
+/** Navigation menu items for the sidebar. */
 export const NAV_ITEMS = [
-  { label: 'Agente Autônomo', href: ROUTES.DASHBOARD, icon: 'Cpu' },
-  { label: 'Políticas Guard', href: ROUTES.SECURITY, icon: 'ShieldCheck' },
-  { label: 'Malha Zero-Trust', href: ROUTES.NETWORK, icon: 'Network' },
-  { label: 'Histórico Ledger', href: ROUTES.LEDGER, icon: 'Receipt' },
+  { label: 'Autonomous Agent', href: ROUTES.DASHBOARD, icon: 'Cpu' },
+  { label: 'Guard Policies', href: ROUTES.SECURITY, icon: 'ShieldCheck' },
+  { label: 'Zero-Trust Mesh', href: ROUTES.NETWORK, icon: 'Network' },
+  { label: 'Ledger History', href: ROUTES.LEDGER, icon: 'Receipt' },
 ] as const;
 
-/** Definições de Fornecedores Aprovados para exibição de simulação. */
+/** Approved Merchant configuration for simulation display. */
 export interface MerchantConfig {
   id: string;
   name: string;
@@ -31,29 +31,29 @@ export const APPROVED_MERCHANTS: MerchantConfig[] = [
   {
     id: 'aws_compute',
     name: 'Amazon Web Services M2M',
-    category: 'Processamento de CPU',
+    category: 'CPU Processing',
     icon: 'Server',
-    description: 'Instâncias elásticas de processamento em nuvem sob demanda.',
+    description: 'Elastic on-demand cloud compute instances.',
   },
   {
     id: 'mcmaster_carr',
     name: 'McMaster-Carr Supply Co.',
-    category: 'Fluido Coolant',
+    category: 'Coolant Fluid',
     icon: 'Wrench',
-    description: 'Fornecimento de insumos industriais e fluidos refrigerantes.',
+    description: 'Industrial supply and specialized coolant fluids.',
   },
   {
     id: 'google_cloud_m2m',
     name: 'Google Cloud Platform (M2M Portal)',
-    category: 'AI / Armazenamento',
+    category: 'AI / Storage',
     icon: 'Cloud',
-    description: 'Expansão autônoma de armazenamento e buffer de memória.',
+    description: 'Autonomous storage expansion and high-speed memory buffers.',
   },
   {
     id: 'partssource_corp',
     name: 'PartsSource Industrial',
-    category: 'Hardware e Sensores',
+    category: 'Hardware & Sensors',
     icon: 'Cpu',
-    description: 'Sourcing de peças, sensores e circuitos de automação.',
+    description: 'Industrial replacement parts, sensors, and automation circuits.',
   },
 ];

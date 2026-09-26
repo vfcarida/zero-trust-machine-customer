@@ -150,3 +150,237 @@ export class MockSettlementProvider implements ISettlementProvider {
     };
   }
 }
+
+export interface HttpSettlementProviderOptions {
+  gatewayUrl: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  fetchFn?: typeof fetch;
+}
+
+/**
+ * Production-ready HTTP Settlement Rail Provider.
+ *
+ * Dispatches payments to an external AP4M clearing gateway or Coinbase x402 endpoint over HTTPS/mTLS.
+ * Translates timeouts, connection drops, and 5xx errors into 'AMBIGUOUS' states to trigger
+ * deterministic reconciliation and compensation loops.
+ */
+export class HttpSettlementProvider implements ISettlementProvider {
+  private gatewayUrl: string;
+  private apiKey?: string;
+  private timeoutMs: number;
+  private fetchFn: typeof fetch;
+
+  constructor(options: HttpSettlementProviderOptions) {
+    this.gatewayUrl = options.gatewayUrl.replace(/\/+$/, '');
+    this.apiKey = options.apiKey;
+    this.timeoutMs = options.timeoutMs ?? 10000;
+    this.fetchFn = options.fetchFn ?? globalThis.fetch;
+  }
+
+  public async executeSettlement(request: SettlementRequest): Promise<SettlementProviderResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Idempotency-Key': request.payload.nonce,
+    };
+
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    if (request.dpopProof) {
+      headers['DPoP'] = request.dpopProof;
+    }
+    if (request.zitiSecured) {
+      headers['X-OpenZiti-Secured'] = 'true';
+    }
+
+    try {
+      const response = await this.fetchFn(`${this.gatewayUrl}/v1/settlements`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          transactionId: request.transactionId,
+          payload: request.payload,
+          zitiSecured: request.zitiSecured,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      const raw = await response.json().catch(() => null);
+
+      if (response.ok && raw && typeof raw === 'object' && 'status' in raw && (raw as Record<string, unknown>).status === 'SETTLED') {
+        return {
+          status: 'SETTLED',
+          authCode: (raw as Record<string, unknown>).authCode as string | undefined,
+          networkTransactionId: (raw as Record<string, unknown>).networkTransactionId as string | undefined,
+          rawResponse: raw,
+        };
+      }
+
+      if (response.status >= 500) {
+        return {
+          status: 'AMBIGUOUS',
+          error: `RAIL_SERVER_ERROR (${response.status}): Gateway encountered server error during settlement.`,
+          rawResponse: raw,
+        };
+      }
+
+      return {
+        status: 'FAILED',
+        error: (raw && typeof raw === 'object' && 'error' in raw && typeof (raw as Record<string, unknown>).error === 'string')
+          ? ((raw as Record<string, unknown>).error as string)
+          : `RAIL_PAYMENT_DECLINED (${response.status}): Gateway rejected settlement request.`,
+        rawResponse: raw,
+      };
+    } catch (err: unknown) {
+      clearTimeout(timer);
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      const msg = isAbort
+        ? `RAIL_GATEWAY_TIMEOUT: Settlement gateway request timed out after ${this.timeoutMs}ms.`
+        : `RAIL_NETWORK_ERROR: ${err instanceof Error ? err.message : String(err)}`;
+
+      logger.warn('HttpSettlementProvider network failure during settlement', {
+        transactionId: request.transactionId,
+        error: msg,
+      });
+
+      return {
+        status: 'AMBIGUOUS',
+        error: msg,
+      };
+    }
+  }
+
+  public async reconcile(transactionId: string, payload: X402Payload): Promise<SettlementProviderResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    };
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+
+    try {
+      const response = await this.fetchFn(
+        `${this.gatewayUrl}/v1/settlements/${encodeURIComponent(transactionId)}?nonce=${encodeURIComponent(payload.nonce)}`,
+        {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timer);
+      const raw = await response.json().catch(() => null);
+
+      if (response.ok && raw && typeof raw === 'object' && 'status' in raw && (raw as Record<string, unknown>).status === 'SETTLED') {
+        return {
+          status: 'SETTLED',
+          authCode: (raw as Record<string, unknown>).authCode as string | undefined,
+          networkTransactionId: (raw as Record<string, unknown>).networkTransactionId as string | undefined,
+          rawResponse: raw,
+        };
+      }
+
+      return {
+        status: 'FAILED',
+        error: 'RECONCILIATION_UNCONFIRMED: Remote clearing rail confirmed transaction was not processed.',
+        rawResponse: raw,
+      };
+    } catch (err: unknown) {
+      clearTimeout(timer);
+      return {
+        status: 'FAILED',
+        error: `RECONCILIATION_FAILED: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  public async compensate(
+    transactionId: string,
+    payload: X402Payload,
+    reason: string
+  ): Promise<CompensationResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+
+    try {
+      const response = await this.fetchFn(
+        `${this.gatewayUrl}/v1/settlements/${encodeURIComponent(transactionId)}/compensate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ nonce: payload.nonce, reason }),
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timer);
+      const raw = await response.json().catch(() => null);
+
+      if (response.ok) {
+        return {
+          compensated: true,
+          compensationId: (raw && typeof raw === 'object' && 'compensationId' in raw && typeof (raw as Record<string, unknown>).compensationId === 'string')
+            ? ((raw as Record<string, unknown>).compensationId as string)
+            : `comp_${crypto.randomBytes(8).toString('hex')}`,
+        };
+      }
+
+      return {
+        compensated: false,
+        compensationId: '',
+        error: `COMPENSATION_REJECTED (${response.status})`,
+      };
+    } catch (err: unknown) {
+      clearTimeout(timer);
+      return {
+        compensated: false,
+        compensationId: '',
+        error: `COMPENSATION_ERROR: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+}
+
+/**
+ * Configurable settlement provider factory.
+ * Selects HttpSettlementProvider if SETTLEMENT_RAIL_URL is configured, else defaults to MockSettlementProvider.
+ */
+export function createSettlementProvider(options?: {
+  mode?: 'mock' | 'http';
+  gatewayUrl?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  fetchFn?: typeof fetch;
+}): ISettlementProvider {
+  const envMode = process.env.SETTLEMENT_RAIL_MODE === 'http' || Boolean(process.env.SETTLEMENT_RAIL_URL);
+  const selectedMode = options?.mode || (envMode ? 'http' : 'mock');
+
+  if (selectedMode === 'http') {
+    const gatewayUrl = options?.gatewayUrl || process.env.SETTLEMENT_RAIL_URL || 'https://api.settlement.internal';
+    return new HttpSettlementProvider({
+      gatewayUrl,
+      apiKey: options?.apiKey || process.env.SETTLEMENT_API_KEY,
+      timeoutMs: options?.timeoutMs || 10000,
+      fetchFn: options?.fetchFn,
+    });
+  }
+
+  return new MockSettlementProvider();
+}
+

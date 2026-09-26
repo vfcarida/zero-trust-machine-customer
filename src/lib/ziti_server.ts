@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { createRequire } from 'module';
 import { globalSettlementService } from '../application/services/settlement_service';
-import { X402Payload } from '../domain/types';
+import { X402Payload, X402SettlementResponse } from '../domain/types';
 
 // Dynamic server-side import of the native OpenZiti C++ SDK node module
 interface ZitiSdkInterface {
@@ -44,7 +44,7 @@ if (typeof window === 'undefined') {
 export interface ZitiTransmissionResult {
   success: boolean;
   logs: string[];
-  responsePayload?: unknown;
+  responsePayload?: X402SettlementResponse | Record<string, unknown>;
   error?: string;
 }
 
@@ -134,7 +134,7 @@ export async function transmitPayloadOverZiti(
       logs.push(`[${new Date().toISOString()}] 📥 Secure response received from target endpoint in ${latency}ms.`);
       
       try {
-        const parsedResp: unknown = JSON.parse(responseData);
+        const parsedResp = JSON.parse(responseData) as Record<string, unknown>;
         return {
           success: true,
           logs,

@@ -211,5 +211,28 @@ describe('Integration: OPA Policy Resolution & Decision Engine (Suite E2)', () =
       expect(decision.reasons).toContain('TAINTED_PAYLOAD_HITL_REQUIRED');
       expect(decision.provenance).toBe('embedded-dev');
     });
+
+    it('should allow transaction for custom merchant when dynamically added to guardSettings.allowlist', async () => {
+      const customSettings: GuardSettings = {
+        ...guardSettings,
+        allowlist: ['custom_acme_corp'],
+      };
+      const customPayload: X402Payload = {
+        ...validPayload,
+        merchantId: 'custom_acme_corp',
+      };
+
+      const decision = await devClient.evaluateAuthorization({
+        action: 'execute_transaction',
+        transaction: customPayload,
+        currentDailySpendUcents: 0,
+        guardSettings: customSettings,
+        taintStatus: 'UNTAINTED',
+      });
+
+      expect(decision.allow).toBe(true);
+      expect(decision.reasons).toHaveLength(0);
+      expect(decision.provenance).toBe('embedded-dev');
+    });
   });
 });

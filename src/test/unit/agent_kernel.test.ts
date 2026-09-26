@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AgentKernel } from '../../application/kernel/agent_kernel';
 import { GuardSettings, X402Payload, TrustedMetadataEnvelope } from '../../domain/types';
 import { AgentKernelQuotaExceededError, SecurityPolicyViolationError } from '../../domain/errors/domain_errors';
@@ -81,5 +81,46 @@ describe('AgentKernel - Execution Kernel & Quota Safety', () => {
         envelope: untaintedEnvelope,
       })
     ).rejects.toThrow(SecurityPolicyViolationError);
+  });
+
+  it('should reset rate limit after 60-second sliding window elapses', async () => {
+    let currentTime = 1700000000000;
+    const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+
+    try {
+      const kernel = new AgentKernel(defaultSettings);
+
+      // Execute 5 actions up to the quota limit
+      for (let i = 0; i < 5; i++) {
+        await kernel.interceptAndValidate({
+          action: 'execute_transaction',
+          payload: samplePayload,
+          envelope: untaintedEnvelope,
+        });
+      }
+
+      // 6th action immediately fails within the same minute
+      await expect(
+        kernel.interceptAndValidate({
+          action: 'execute_transaction',
+          payload: samplePayload,
+          envelope: untaintedEnvelope,
+        })
+      ).rejects.toThrow(AgentKernelQuotaExceededError);
+
+      // Advance time by 61 seconds (prior timestamps now outside sliding window)
+      currentTime += 61000;
+
+      // Should now succeed because prior timestamps have fallen outside the 60s window
+      const result = await kernel.interceptAndValidate({
+        action: 'execute_transaction',
+        payload: samplePayload,
+        envelope: untaintedEnvelope,
+      });
+
+      expect(result.allowed).toBe(true);
+    } finally {
+      dateSpy.mockRestore();
+    }
   });
 });

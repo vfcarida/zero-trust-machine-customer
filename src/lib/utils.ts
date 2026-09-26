@@ -1,5 +1,5 @@
 // ============================================================================
-// Cliente Máquina Zero-Trust — Funções Utilitárias
+// Zero-Trust Machine Customer — Utility Functions
 // ============================================================================
 
 /** Merges CSS class names, filtering out falsy values. */

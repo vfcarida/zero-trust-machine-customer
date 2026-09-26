@@ -22,6 +22,13 @@ allow {
 }
 
 merchant_is_allowlisted {
+    input.guardSettings.allowlist
+    count(input.guardSettings.allowlist) > 0
+    input.transaction.merchantId in input.guardSettings.allowlist
+}
+
+merchant_is_allowlisted {
+    not input.guardSettings.allowlist
     input.transaction.merchantId in default_allowlisted_merchants
 }
 

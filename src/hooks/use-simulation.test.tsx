@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, renderHook } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { SimulationProvider, useSimulation } from './use-simulation';
 
 // Simple consumer component to assist hook assertion
@@ -43,7 +43,7 @@ describe('useSimulation Hook & Provider Context', () => {
   });
 
   it('should initialize simulation states and generate RSA keys on bootstrap', async () => {
-    const mockGetItem = vi.spyOn(localStorage, 'getItem').mockReturnValue(null);
+    vi.spyOn(localStorage, 'getItem').mockReturnValue(null);
     const mockSetItem = vi.spyOn(localStorage, 'setItem');
 
     render(
@@ -141,6 +141,10 @@ describe('useSimulation Hook & Provider Context', () => {
         <TestConsumer />
       </SimulationProvider>
     );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     // Ensure low limit matches
     expect(screen.getByTestId('spend-limit').textContent).toBe('1000000');
