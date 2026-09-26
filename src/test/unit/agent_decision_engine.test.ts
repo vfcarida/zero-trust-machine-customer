@@ -73,4 +73,34 @@ describe('AgentDecisionEngine Unit Tests', () => {
     expect(decision.shouldProcure).toBe(false);
     expect(decision.reasoningSteps.find((s) => s.type === 'REASONING_CHAIN')?.message).toContain('nominal');
   });
+
+  it('supports asynchronous evaluation via evaluateProcurementAsync with default local Gemma provider', async () => {
+    const asyncDecision = await engine.evaluateProcurementAsync(baseTelemetry);
+    expect(asyncDecision.shouldProcure).toBe(true);
+    expect(asyncDecision.amountUcents).toBe(8000000);
+    expect(asyncDecision.reasoningSteps.some((s) => s.type === 'REASONING_CHAIN')).toBe(true);
+    const chainStep = asyncDecision.reasoningSteps.find((s) => s.type === 'REASONING_CHAIN');
+    expect(chainStep?.message).toContain('gemma-4-e2b-it');
+  });
+
+  it('supports pluggable custom ILLMProvider for third-party inference engines', async () => {
+    const customProvider = {
+      modelName: 'custom-cloud-slm:3b',
+      generateCompletion: async () => ({
+        text: '<think>Custom SLM confirms coolant replenishment critical.</think> ACTION: AUTHORIZE_PROCUREMENT',
+        thought: 'Custom SLM confirms coolant replenishment critical.',
+        model: 'custom-cloud-slm:3b',
+        provenance: 'cloud-llm-external' as const,
+        latencyMs: 12,
+      }),
+    };
+
+    const customEngine = new AgentDecisionEngine('did:key:custom_agent', customProvider);
+    const decision = await customEngine.evaluateProcurementAsync(baseTelemetry);
+
+    expect(decision.shouldProcure).toBe(true);
+    const reasoningChain = decision.reasoningSteps.find((s) => s.type === 'REASONING_CHAIN');
+    expect(reasoningChain?.message).toContain('custom-cloud-slm:3b');
+    expect(reasoningChain?.message).toContain('Custom SLM confirms coolant replenishment critical.');
+  });
 });

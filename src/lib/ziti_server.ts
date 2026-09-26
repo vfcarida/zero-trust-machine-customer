@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { createRequire } from 'module';
 import { globalSettlementService } from '../application/services/settlement_service';
 import { X402Payload, X402SettlementResponse } from '../domain/types';
 
@@ -26,18 +25,16 @@ let isZitiSdkLoaded = false;
 
 if (typeof window === 'undefined') {
   try {
-    // Hide module name in a variable so bundlers (e.g. Webpack) don't resolve it statically at build-time
-    const zitiModuleName = '@openziti/ziti-sdk-nodejs';
-    const dynamicRequire = createRequire(import.meta.url);
-    zitiSdk = dynamicRequire(zitiModuleName) as ZitiSdkInterface;
-    isZitiSdkLoaded = true;
-    console.log('✅ Native Node.js OpenZiti SDK loaded successfully.');
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.warn(
-      '⚠️ Native OpenZiti SDK not loaded (running in high-fidelity sandbox/simulation mode). Reason:',
-      errorMsg
-    );
+    // Isolate optional native module loader from static bundler NFT tracing
+    const loadNative = new Function('mod', 'try { return require(mod); } catch (e) { return null; }');
+    const loadedModule = loadNative('@openziti/ziti-sdk-nodejs');
+    if (loadedModule) {
+      zitiSdk = loadedModule as ZitiSdkInterface;
+      isZitiSdkLoaded = true;
+      console.log('✅ Native Node.js OpenZiti SDK loaded successfully.');
+    }
+  } catch {
+    // Non-fatal: running in high-fidelity zero-trust simulated sandbox mode
   }
 }
 
@@ -62,9 +59,11 @@ export async function transmitPayloadOverZiti(
   logs.push(`[${new Date().toISOString()}] 🚀 Initializing Zero-Trust transmission tunnel`);
   logs.push(`[${new Date().toISOString()}] 📦 Target Service: "${serviceName}"`);
 
-  // Locate the cryptographic identity file
+  // Locate the cryptographic identity file (isolated from static bundle tracing)
   const targetIdPath = identityFilePath || process.env.ZITI_IDENTITY_FILE || 'ziti-identity.json';
-  const resolvedPath = path.resolve(process.cwd(), targetIdPath);
+  const resolvedPath = path.isAbsolute(targetIdPath)
+    ? targetIdPath
+    : path.join(/*turbopackIgnore: true*/ (process.cwd ? process.cwd() : '.'), targetIdPath);
   
   logs.push(`[${new Date().toISOString()}] 🔍 Searching for Ziti identity profile at: "${resolvedPath}"`);
 

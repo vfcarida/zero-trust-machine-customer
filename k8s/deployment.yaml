@@ -49,6 +49,22 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /api/audit-trail
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/audit-trail
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
 
         # Sidecar 1: Open Policy Agent (OPA) Policy Enforcement Engine
         - name: opa-sidecar
@@ -62,6 +78,18 @@ spec:
             - name: opa-policy-volume
               mountPath: /policies
               readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health?bundle=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 3
+            periodSeconds: 5
           resources:
             limits:
               cpu: "200m"
@@ -86,6 +114,85 @@ spec:
         - name: opa-policy-volume
           configMap:
             name: opa-rego-policy-cm
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-rego-policy-cm
+  namespace: machine-customer-system
+data:
+  machine_customer.rego: |
+    package machine_customer.authz
+    import future.keywords.in
+
+    default allow = false
+
+    default_allowlisted_merchants = [
+        "aws_compute",
+        "partssource_corp",
+        "google_cloud_m2m",
+        "mcmaster_carr"
+    ]
+
+    allow {
+        input.action == "execute_transaction"
+        merchant_is_allowlisted
+        spend_within_daily_limit
+        payload_is_not_tainted
+    }
+
+    merchant_is_allowlisted {
+        input.guardSettings.allowlist
+        count(input.guardSettings.allowlist) > 0
+        input.transaction.merchantId in input.guardSettings.allowlist
+    }
+
+    merchant_is_allowlisted {
+        not input.guardSettings.allowlist
+        input.transaction.merchantId in default_allowlisted_merchants
+    }
+
+    spend_within_daily_limit {
+        projected_spend := input.currentDailySpendUcents + input.transaction.amountUcents
+        projected_spend <= input.guardSettings.dailySpendLimitUcents
+    }
+
+    payload_is_not_tainted {
+        input.taintStatus != "TAINTED"
+    }
+
+    deny_reason["UNAUTHORIZED_MERCHANT"] {
+        input.action == "execute_transaction"
+        not merchant_is_allowlisted
+    }
+
+    deny_reason["DAILY_LIMIT_EXCEEDED"] {
+        input.action == "execute_transaction"
+        not spend_within_daily_limit
+    }
+
+    deny_reason["TAINTED_PAYLOAD_HITL_REQUIRED"] {
+        input.action == "execute_transaction"
+        not payload_is_not_tainted
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zero-trust-machine-customer
+  namespace: machine-customer-system
+  labels:
+    app.kubernetes.io/name: zero-trust-machine-customer
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app: zero-trust-machine-customer
 
 ---
 apiVersion: v1

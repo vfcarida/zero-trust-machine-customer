@@ -12,7 +12,8 @@ export type ThreatCategory =
   | 'PRIVILEGE_ESCALATION'
   | 'FINANCIAL_HIJACKING'
   | 'DELIMITER_EVASION'
-  | 'EXFILTRATION_PAYLOAD';
+  | 'EXFILTRATION_PAYLOAD'
+  | 'STEGANOGRAPHIC_OBSCURATION';
 
 export interface ThreatAnalysisResult {
   isMalicious: boolean;
@@ -20,6 +21,8 @@ export interface ThreatAnalysisResult {
   matchedPatterns: string[];
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 }
+
+const ZERO_WIDTH_REGEX = /[\u200B-\u200D\uFEFF\u2060\u180E]/;
 
 const THREAT_RULES: { category: ThreatCategory; pattern: RegExp; name: string }[] = [
   {
@@ -83,7 +86,8 @@ export class TaintEnvelopeTracker {
   }
 
   /**
-   * Performs deep heuristic threat analysis on content across 6 adversarial vectors.
+   * Performs deep heuristic threat analysis on content across 7 adversarial vectors,
+   * including Unicode normalization and zero-width steganographic obscuration detection.
    */
   public static analyzeContent(content: string): ThreatAnalysisResult {
     if (!content || typeof content !== 'string') {
@@ -93,8 +97,19 @@ export class TaintEnvelopeTracker {
     const matchedCategories = new Set<ThreatCategory>();
     const matchedPatterns: string[] = [];
 
+    // 1. Detect zero-width or steganographic character injection
+    if (ZERO_WIDTH_REGEX.test(content)) {
+      matchedCategories.add('STEGANOGRAPHIC_OBSCURATION');
+      matchedPatterns.push('Zero-width / steganographic character evasion pattern');
+    }
+
+    // 2. Unicode normalization (NFKC) and stripping zero-width characters to counter evasion
+    const normalizedContent = content
+      .normalize('NFKC')
+      .replace(/[\u200B-\u200D\uFEFF\u2060\u180E]/g, '');
+
     for (const rule of THREAT_RULES) {
-      if (rule.pattern.test(content)) {
+      if (rule.pattern.test(content) || rule.pattern.test(normalizedContent)) {
         matchedCategories.add(rule.category);
         matchedPatterns.push(rule.name);
       }
@@ -104,7 +119,11 @@ export class TaintEnvelopeTracker {
     const isMalicious = threatCategories.length > 0;
 
     let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
-    if (threatCategories.includes('FINANCIAL_HIJACKING') || threatCategories.includes('DELIMITER_EVASION')) {
+    if (
+      threatCategories.includes('FINANCIAL_HIJACKING') ||
+      threatCategories.includes('DELIMITER_EVASION') ||
+      threatCategories.includes('STEGANOGRAPHIC_OBSCURATION')
+    ) {
       riskLevel = 'CRITICAL';
     } else if (threatCategories.length >= 2) {
       riskLevel = 'CRITICAL';
