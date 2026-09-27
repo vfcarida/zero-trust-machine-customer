@@ -43,6 +43,48 @@ export function resolveExpectedUrl(req: Request): string {
   return 'http://localhost:3000/api/transmit-ziti';
 }
 
+/**
+ * GET /api/transmit-ziti
+ * Gateway discovery and zero-trust capabilities metadata.
+ */
+export async function GET() {
+  return NextResponse.json({
+    status: 'ACTIVE',
+    gateway: 'zero-trust-machine-customer-api',
+    version: '1.0.0',
+    capabilities: {
+      auth: {
+        dpop: {
+          rfc: 'RFC 9449',
+          supportedAlgorithms: ['ES256'],
+          maxClockSkewSeconds: 60,
+          replayProtection: 'Single-Use JTI Cache',
+        },
+        spiffe: {
+          svidType: 'SPKI Public Key',
+          trustDomain: 'zero-trust.machine.customer',
+        },
+      },
+      policyDecisionPoint: {
+        engine: 'Open Policy Agent (OPA)',
+        package: 'machine_customer.authz',
+        failClosedStrict: process.env.OPA_ENFORCE_STRICT === 'true',
+      },
+      networkOverlay: {
+        mesh: 'OpenZiti Dark Host',
+        service: 'ap4m-settlement-service',
+        zeroInboundPorts: true,
+      },
+      auditTrail: {
+        standard: 'NIST SP 800-207 §3.4',
+        hashAlgorithm: 'SHA-256',
+        continuousVerification: true,
+      },
+    },
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export async function POST(req: Request) {
   const startTime = Date.now();
   try {

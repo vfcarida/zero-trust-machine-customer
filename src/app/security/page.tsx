@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useSimulation } from '@/hooks/use-simulation';
-import { Shield, ShieldAlert, KeyRound, Copy, RotateCcw, AlertTriangle, Plus, Trash2 } from 'lucide-react';
+import { Shield, ShieldAlert, KeyRound, Copy, RotateCcw, AlertTriangle, Plus, Trash2, FileCode2, CheckCircle2, Lock } from 'lucide-react';
 import { useToast } from '@/components/toast-provider';
 
 export default function SecurityPage() {
@@ -291,6 +291,84 @@ export default function SecurityPage() {
               {showPrivateKey ? (agentKeys?.privateKey || 'No key generated.') : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
             </pre>
           </div>
+        </div>
+      </div>
+
+      {/* Grid: OPA Policy-as-Code & OWASP Threat Matrix */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Open Policy Agent (OPA) PDP Panel */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h2 className="text-sm font-bold text-white flex items-center space-x-2">
+              <FileCode2 className="text-cyan-400" size={16} />
+              <span>OPA Policy-as-Code Engine (machine_customer.rego)</span>
+            </h2>
+            <span className="text-[10px] font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800/60 px-2 py-0.5 rounded-full">
+              Package: machine_customer.authz
+            </span>
+          </div>
+
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center justify-between bg-slate-950/80 border border-slate-850 p-3 rounded-xl">
+              <span className="text-slate-400 font-mono">1. merchant_is_allowlisted</span>
+              <span className="text-emerald-400 font-mono font-bold flex items-center space-x-1">
+                <CheckCircle2 size={12} />
+                <span>Enforced</span>
+              </span>
+            </div>
+            <div className="flex items-center justify-between bg-slate-950/80 border border-slate-850 p-3 rounded-xl">
+              <span className="text-slate-400 font-mono">2. spend_within_daily_limit</span>
+              <span className="text-emerald-400 font-mono font-bold flex items-center space-x-1">
+                <CheckCircle2 size={12} />
+                <span>Enforced</span>
+              </span>
+            </div>
+            <div className="flex items-center justify-between bg-slate-950/80 border border-slate-850 p-3 rounded-xl">
+              <span className="text-slate-400 font-mono">3. payload_is_not_tainted</span>
+              <span className="text-emerald-400 font-mono font-bold flex items-center space-x-1">
+                <CheckCircle2 size={12} />
+                <span>Enforced</span>
+              </span>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-slate-500 font-mono leading-relaxed">
+            Policy evaluations are executed independently of agent application logic via sidecar or embedded AST in accordance with NIST SP 800-207 Zero-Trust PDP architecture.
+          </p>
+        </div>
+
+        {/* OWASP Agentic Top 10 Active Defense Matrix */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h2 className="text-sm font-bold text-white flex items-center space-x-2">
+              <Lock className="text-amber-400" size={16} />
+              <span>OWASP Top 10 Agentic Threat Matrix</span>
+            </h2>
+            <span className="text-[10px] font-mono font-bold bg-amber-950 text-amber-400 border border-amber-800/60 px-2 py-0.5 rounded-full">
+              7 Vectors Monitored
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin text-[11px] font-mono">
+            {[
+              { id: 'DIRECT_INSTRUCTION_OVERRIDE', label: 'Instruction Override / Jailbreak', status: 'ACTIVE' },
+              { id: 'FINANCIAL_HIJACKING', label: 'Wallet Redirection / Balance Drain', status: 'ACTIVE' },
+              { id: 'STEGANOGRAPHIC_OBSCURATION', label: 'Zero-Width Steganographic Evasion', status: 'ACTIVE' },
+              { id: 'DELIMITER_EVASION', label: 'Special Token / Delimiter Injection', status: 'ACTIVE' },
+              { id: 'PRIVILEGE_ESCALATION', label: 'Administrative Sudo Escalation', status: 'ACTIVE' },
+              { id: 'SYSTEM_PROMPT_EXTRACTION', label: 'Internal Directive Prompt Leakage', status: 'ACTIVE' },
+              { id: 'EXFILTRATION_PAYLOAD', label: 'Markdown URI / Network Data Exfiltration', status: 'ACTIVE' },
+            ].map((v) => (
+              <div key={v.id} className="flex items-center justify-between bg-slate-950 border border-slate-850 px-3 py-1.5 rounded-lg">
+                <span className="text-slate-350">{v.label}</span>
+                <span className="text-emerald-400 text-[10px] font-bold">FAIL-CLOSED</span>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-slate-500 font-mono leading-relaxed">
+            All untrusted inputs, tool outputs, and merchant vendor quotes are analyzed prior to invoking private key transaction signing.
+          </p>
         </div>
       </div>
     </div>

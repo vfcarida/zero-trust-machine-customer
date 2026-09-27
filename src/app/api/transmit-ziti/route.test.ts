@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { POST, resolveExpectedUrl } from './route';
+import { POST, GET, resolveExpectedUrl } from './route';
 import { transmitPayloadOverZiti } from '@/lib/ziti_server';
 import { verifyX402Payload } from '@/lib/agent_pay_protocol';
 import { DPoPManager } from '@/infrastructure/auth/dpop';
@@ -375,6 +375,21 @@ describe('Transmit Ziti API Route Handler', () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
       expect(transmitPayloadOverZiti).toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /api/transmit-ziti — Gateway Metadata & Capabilities', () => {
+    it('should return gateway metadata and zero-trust capabilities', async () => {
+      const response = await GET();
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe('ACTIVE');
+      expect(data.gateway).toBe('zero-trust-machine-customer-api');
+      expect(data.version).toBe('1.0.0');
+      expect(data.capabilities.auth.dpop.rfc).toBe('RFC 9449');
+      expect(data.capabilities.networkOverlay.mesh).toBe('OpenZiti Dark Host');
+      expect(data.capabilities.auditTrail.standard).toBe('NIST SP 800-207 §3.4');
+      expect(data.capabilities.policyDecisionPoint.engine).toBe('Open Policy Agent (OPA)');
     });
   });
 });
