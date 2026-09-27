@@ -14,6 +14,7 @@ import { MockSettlementProvider } from '../../infrastructure/settlement/settleme
 import { IllegalStateTransitionError } from '../../domain/errors/domain_errors';
 import { AgentKernel } from '../../application/kernel/agent_kernel';
 import { X402Payload, GuardSettings, TrustedMetadataEnvelope } from '../../domain/types';
+import { AuditTrailManager } from '../../infrastructure/logging/audit_trail';
 
 describe('Integration: Transaction State Machine, Idempotency & Reconciliation (Suite E4)', () => {
   let samplePayload: X402Payload;
@@ -365,6 +366,78 @@ describe('Integration: Transaction State Machine, Idempotency & Reconciliation (
           envelope: expensiveEnvelope,
         })
       ).rejects.toThrow();
+    });
+  });
+
+  describe('E4.6: Cryptographic Audit Trail Sealing (ZTMC-AUDIT-013)', () => {
+    it('should sequentially seal SETTLEMENT_COMMENCED and SETTLEMENT_FINALIZED events into hash chain', async () => {
+      const store = new InMemorySpendLedgerStore();
+      const ledger = new SpendLedger(store);
+      const provider = new MockSettlementProvider();
+      const auditTrail = new AuditTrailManager();
+
+      const service = new SettlementService({
+        spendLedger: ledger,
+        settlementProvider: provider,
+        auditTrail,
+        dailySpendLimitUcents: 50000000,
+      });
+
+      const res = await service.processSettlement(samplePayload, true);
+      expect(res.success).toBe(true);
+      expect(res.state).toBe('SETTLED');
+
+      const history = auditTrail.getHistory();
+      expect(history.length).toBe(2);
+
+      // Event 1: SETTLEMENT_COMMENCED
+      expect(history[0].sequence).toBe(1);
+      expect(history[0].eventType).toBe('SETTLEMENT_COMMENCED');
+      expect(history[0].previousHash).toBe('GENESIS');
+      expect(history[0].data.nonce).toBe(samplePayload.nonce);
+      expect(history[0].data.amountUcents).toBe(samplePayload.amountUcents);
+
+      // Event 2: SETTLEMENT_FINALIZED
+      expect(history[1].sequence).toBe(2);
+      expect(history[1].eventType).toBe('SETTLEMENT_FINALIZED');
+      expect(history[1].previousHash).toBe(history[0].hash);
+      expect(history[1].data.authCode).toBeDefined();
+
+      // Cryptographic hash chain validation
+      const verification = auditTrail.verifyIntegrity();
+      expect(verification.isValid).toBe(true);
+      expect(verification.totalRecords).toBe(2);
+    });
+
+    it('should seal SETTLEMENT_COMPENSATED into audit chain when settlement provider times out', async () => {
+      const store = new InMemorySpendLedgerStore();
+      const ledger = new SpendLedger(store);
+      const provider = new MockSettlementProvider();
+      provider.setNextBehavior('AMBIGUOUS');
+      provider.setReconcileResolution('FAILED');
+      const auditTrail = new AuditTrailManager();
+
+      const service = new SettlementService({
+        spendLedger: ledger,
+        settlementProvider: provider,
+        auditTrail,
+        dailySpendLimitUcents: 50000000,
+      });
+
+      const res = await service.processSettlement(samplePayload, true);
+      expect(res.success).toBe(false);
+      expect(res.state).toBe('COMPENSATED');
+
+      const history = auditTrail.getHistory();
+      expect(history.length).toBe(2);
+
+      expect(history[0].eventType).toBe('SETTLEMENT_COMMENCED');
+      expect(history[1].eventType).toBe('SETTLEMENT_COMPENSATED');
+      expect(history[1].previousHash).toBe(history[0].hash);
+      expect(history[1].data.compensationId).toBeDefined();
+
+      const verification = auditTrail.verifyIntegrity();
+      expect(verification.isValid).toBe(true);
     });
   });
 });

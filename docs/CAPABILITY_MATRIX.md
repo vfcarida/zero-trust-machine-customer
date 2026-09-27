@@ -93,7 +93,8 @@ Every control is categorized into one of three operational states:
   - **Ambiguous Outcomes**: Interrupted or timed-out settlements enter an ambiguous state and trigger automatic compensation/voiding routines.
   - **Pluggable Rails**: Supports both `MockSettlementProvider` and production `HttpSettlementProvider` with configurable gateway URLs, timeouts, and headers.
   - **Distributed Persistence**: Supports both local `FileSpendLedgerStore` and enterprise `PostgresSpendLedgerStore` with parameterized queries.
-- **Evidence**: `src/domain/services/settlement_state_machine.ts`, `src/infrastructure/storage/postgres_spend_ledger_store.ts`, `src/infrastructure/settlement/settlement_provider.ts`, tested in `src/test/unit/postgres_spend_ledger.test.ts` and `src/test/unit/http_settlement_provider.test.ts`.
+  - **Cryptographic Non-Repudiation (ZTMC-AUDIT-013)**: Directly integrated with `AuditTrailManager`, automatically sealing sequential SHA-256 hash-chain records on settlement commencement (`SETTLEMENT_COMMENCED`), finalization (`SETTLEMENT_FINALIZED`), reconciliation (`SETTLEMENT_RECONCILED`), and voiding (`SETTLEMENT_COMPENSATED`).
+- **Evidence**: `src/application/services/settlement_service.ts`, `src/domain/services/settlement_state_machine.ts`, `src/infrastructure/storage/postgres_spend_ledger_store.ts`, `src/infrastructure/settlement/settlement_provider.ts`, tested in `src/test/integration/settlement_lifecycle.test.ts` (Suite E4), `src/test/unit/postgres_spend_ledger.test.ts`, and `src/test/unit/http_settlement_provider.test.ts`.
 
 ### 3.7. Cryptographic Tamper-Evident Audit Trail (NIST SP 800-207 §3.4)
 - **Operational Reality**: **100% Real Cryptographic Hash Chain & Live API**.

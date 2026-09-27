@@ -8,11 +8,13 @@ import {
   MockSettlementProvider,
 } from '../../infrastructure/settlement/settlement_provider';
 import { logger } from '../../infrastructure/logging/logger';
+import { AuditTrailManager, globalAuditTrail } from '../../infrastructure/logging/audit_trail';
 
 export interface SettlementServiceConfig {
   dailySpendLimitUcents?: number;
   spendLedger?: SpendLedger;
   settlementProvider?: ISettlementProvider;
+  auditTrail?: AuditTrailManager;
 }
 
 export interface SettlementLifecycleResult extends X402SettlementResponse {
@@ -30,11 +32,13 @@ export interface SettlementLifecycleResult extends X402SettlementResponse {
  * 3. Formal state machine transitions (PENDING -> AUTHORIZED -> SETTLING -> SETTLED | FAILED | COMPENSATED).
  * 4. Daily budget quota enforcement against the unified spend ledger.
  * 5. Deterministic reconciliation and compensation for ambiguous network outcomes.
+ * 6. Cryptographic audit trail sealing (NIST SP 800-207 §3.4).
  */
 export class SettlementService {
   private spendLedger: SpendLedger;
   private provider: ISettlementProvider;
   private dailySpendLimitUcents: number;
+  private auditTrail: AuditTrailManager;
 
   // In-flight mutex / promise cache for concurrent identical nonces
   private inFlightRequests: Map<string, Promise<SettlementLifecycleResult>> = new Map();
@@ -43,6 +47,11 @@ export class SettlementService {
     this.spendLedger = config?.spendLedger || new SpendLedger(defaultSpendLedgerStore);
     this.provider = config?.settlementProvider || new MockSettlementProvider();
     this.dailySpendLimitUcents = config?.dailySpendLimitUcents ?? 50000000; // Default $50.00 USD
+    this.auditTrail = config?.auditTrail || globalAuditTrail;
+  }
+
+  public getAuditTrail(): AuditTrailManager {
+    return this.auditTrail;
   }
 
   public getSpendLedger(): SpendLedger {
@@ -192,6 +201,15 @@ export class SettlementService {
     record.state = 'SETTLING';
     await this.spendLedger.saveTransaction(record);
 
+    this.auditTrail.recordEvent('SETTLEMENT_COMMENCED', {
+      transactionId,
+      nonce: payload.nonce,
+      amountUcents: payload.amountUcents,
+      merchantId: payload.merchantId,
+      currency: payload.currency,
+      zitiSecured,
+    });
+
     // 4. Dispatch to Settlement Provider
     const providerResult = await this.provider.executeSettlement({
       transactionId,
@@ -206,6 +224,15 @@ export class SettlementService {
       record.authCode = providerResult.authCode;
       record.transactionId = providerResult.networkTransactionId || transactionId;
       await this.spendLedger.saveTransaction(record);
+
+      this.auditTrail.recordEvent('SETTLEMENT_FINALIZED', {
+        transactionId: record.transactionId,
+        nonce: payload.nonce,
+        settledAmountUcents: payload.amountUcents,
+        merchantId: payload.merchantId,
+        authCode: record.authCode,
+        currency: payload.currency,
+      });
 
       return {
         success: true,
@@ -268,6 +295,14 @@ export class SettlementService {
       record.transactionId = reconResult.networkTransactionId || record.transactionId || record.id;
       await this.spendLedger.saveTransaction(record);
 
+      this.auditTrail.recordEvent('SETTLEMENT_RECONCILED', {
+        transactionId: record.transactionId,
+        nonce: payload.nonce,
+        status: 'CONFIRMED_SETTLED',
+        authCode: record.authCode,
+        merchantId: payload.merchantId,
+      });
+
       return {
         success: true,
         transactionId: record.transactionId,
@@ -293,6 +328,14 @@ export class SettlementService {
     record.compensationId = compResult.compensationId;
     record.error = reconResult.error || 'Settlement was voided and compensated.';
     await this.spendLedger.saveTransaction(record); // Releases reserved budget
+
+    this.auditTrail.recordEvent('SETTLEMENT_COMPENSATED', {
+      transactionId: record.transactionId || record.id,
+      nonce: payload.nonce,
+      compensationId: compResult.compensationId,
+      reason: 'Ambiguous outcome unconfirmed during reconciliation',
+      merchantId: payload.merchantId,
+    });
 
     return {
       success: false,
