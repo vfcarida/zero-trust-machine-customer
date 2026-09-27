@@ -73,7 +73,8 @@ Every control is categorized into one of three operational states:
   - **No Fake Trust Chain**: The trust bundle is marked `SYNTHETIC-SPIFFE-TRUST-BUNDLE`.
   - **No Agent Socket**: The module does not dial `unix:///run/spire/sockets/agent.sock` in standalone mode.
   - Outputs are stamped with `simulated: true`, `synthetic: true`, and `provenance: "synthetic-local-dev"`.
-- **Evidence**: `src/infrastructure/auth/spiffe.ts:25-88`, tested in `src/test/unit/spiffe.test.ts`.
+  - **Canonical Validation (ZTMC-AUDIT-012)**: Implements `validateSpiffeWorkloadId()` to strictly validate and parse SPIFFE URIs against NIST SP 800-204A / RFC 1123, enforcing trust domain boundaries, path segment sanitization, and blocking directory traversal attempts fail-closed.
+- **Evidence**: `src/infrastructure/auth/spiffe.ts`, tested in `src/test/unit/spiffe.test.ts` (10 tests).
 
 ### 3.5. OpenZiti Zero Trust Overlay
 - **Operational Reality**: **Hybrid Client Probe with Deterministic Local Sandbox**.

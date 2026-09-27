@@ -38,6 +38,139 @@ export interface SyntheticWorkloadSvid {
 /** Backward compatibility alias */
 export type X509Svid = SyntheticWorkloadSvid;
 
+export interface SpiffeValidationOptions {
+  expectedTrustDomain?: string;
+  expectedWorkloadPrefix?: string;
+  allowSubdomains?: boolean;
+}
+
+export interface SpiffeValidationResult {
+  isValid: boolean;
+  trustDomain?: string;
+  path?: string;
+  workloadId?: string;
+  error?: string;
+}
+
+/**
+ * Validates and parses a SPIFFE ID against the official SPIFFE Standard Specification (NIST SP 800-204A).
+ *
+ * Rules:
+ * 1. Must use 'spiffe:' scheme.
+ * 2. Trust domain must be valid lowercase DNS hostname (RFC 1123) without port, userinfo, or query.
+ * 3. Path must start with '/' and contain non-empty segments without trailing slash.
+ * 4. Traversal segments ('.' or '..') are strictly rejected.
+ * 5. Validates against expectedTrustDomain and expectedWorkloadPrefix when configured.
+ */
+export function validateSpiffeWorkloadId(
+  rawSpiffeId: string,
+  options?: SpiffeValidationOptions
+): SpiffeValidationResult {
+  if (!rawSpiffeId || typeof rawSpiffeId !== 'string') {
+    return { isValid: false, error: 'SPIFFE ID must be a non-empty string' };
+  }
+
+  // Pre-URL-normalization check for dot-segments / directory traversal
+  if (
+    rawSpiffeId.includes('/../') ||
+    rawSpiffeId.endsWith('/..') ||
+    rawSpiffeId.includes('/./') ||
+    rawSpiffeId.endsWith('/.')
+  ) {
+    return { isValid: false, error: 'SPIFFE ID path must not contain directory traversal segments' };
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawSpiffeId);
+  } catch {
+    return { isValid: false, error: 'Malformed URI syntax' };
+  }
+
+  if (parsedUrl.protocol !== 'spiffe:') {
+    return { isValid: false, error: `Invalid scheme: expected "spiffe:", got "${parsedUrl.protocol}"` };
+  }
+
+  if (parsedUrl.search) {
+    return { isValid: false, error: 'SPIFFE ID must not contain a query string' };
+  }
+  if (parsedUrl.hash) {
+    return { isValid: false, error: 'SPIFFE ID must not contain a fragment' };
+  }
+  if (parsedUrl.username || parsedUrl.password) {
+    return { isValid: false, error: 'SPIFFE ID must not contain userinfo' };
+  }
+  if (parsedUrl.port) {
+    return { isValid: false, error: 'SPIFFE ID trust domain must not specify a port' };
+  }
+
+  const trustDomain = parsedUrl.hostname;
+  if (!trustDomain) {
+    return { isValid: false, error: 'Missing trust domain' };
+  }
+
+  const dnsHostnameRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+  if (!dnsHostnameRegex.test(trustDomain)) {
+    return { isValid: false, error: `Invalid trust domain format: "${trustDomain}"` };
+  }
+
+  const path = parsedUrl.pathname;
+  if (!path || path === '/') {
+    return { isValid: false, error: 'SPIFFE ID path must contain at least one segment' };
+  }
+  if (path.endsWith('/') && path !== '/') {
+    return { isValid: false, error: 'SPIFFE ID path must not end with a trailing slash' };
+  }
+  if (path.includes('//')) {
+    return { isValid: false, error: 'SPIFFE ID path must not contain empty segments' };
+  }
+
+  const segments = path.split('/').filter(Boolean);
+  for (const seg of segments) {
+    if (seg === '.' || seg === '..') {
+      return { isValid: false, error: 'SPIFFE ID path must not contain directory traversal segments' };
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(seg)) {
+      return { isValid: false, error: `SPIFFE ID path segment "${seg}" contains invalid characters` };
+    }
+  }
+
+  if (options?.expectedTrustDomain) {
+    const expected = options.expectedTrustDomain.toLowerCase();
+    if (options.allowSubdomains) {
+      if (trustDomain !== expected && !trustDomain.endsWith(`.${expected}`)) {
+        return {
+          isValid: false,
+          error: `Trust domain "${trustDomain}" does not match or belong to expected domain "${expected}"`,
+        };
+      }
+    } else if (trustDomain !== expected) {
+      return {
+        isValid: false,
+        error: `Trust domain "${trustDomain}" does not match expected domain "${expected}"`,
+      };
+    }
+  }
+
+  if (options?.expectedWorkloadPrefix) {
+    if (!path.startsWith(options.expectedWorkloadPrefix)) {
+      return {
+        isValid: false,
+        error: `SPIFFE ID path "${path}" does not start with expected prefix "${options.expectedWorkloadPrefix}"`,
+      };
+    }
+  }
+
+  const workloadId = segments[segments.length - 1];
+
+  return {
+    isValid: true,
+    trustDomain,
+    path,
+    workloadId,
+  };
+}
+
 /**
  * SPIFFE/SPIRE Synthetic Workload Identity Handler.
  *
@@ -59,8 +192,16 @@ export class SpiffeWorkloadIdentity {
    */
   public async fetchX509Svid(): Promise<SyntheticWorkloadSvid> {
     const rawSpiffeId = `spiffe://${this.trustDomain}/workload/machine-customer-agent`;
-    const parsedId = SpiffeIdSchema.safeParse(rawSpiffeId);
+    
+    // Strict SPIFFE validation check
+    const validation = validateSpiffeWorkloadId(rawSpiffeId, {
+      expectedTrustDomain: this.trustDomain,
+    });
+    if (!validation.isValid) {
+      throw new SpiffeIdentityError(`Invalid SPIFFE ID: ${validation.error}`);
+    }
 
+    const parsedId = SpiffeIdSchema.safeParse(rawSpiffeId);
     if (!parsedId.success) {
       throw new SpiffeIdentityError(`Invalid SPIFFE ID format: ${rawSpiffeId}`);
     }
