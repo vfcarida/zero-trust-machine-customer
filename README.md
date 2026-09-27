@@ -134,6 +134,7 @@ The repository enforces strict separation of concerns following Domain-Driven De
 src/
 ├── app/                                # Next.js 16 App Router UI & API Routes
 │   ├── api/audit-trail/                # Cryptographic audit trail API (NIST SP 800-207 §3.4, JSONL export)
+│   ├── api/health/                     # Liveness and readiness diagnostic probes (RFC 7807/k8s)
 │   ├── api/transmit-ziti/              # Zero-Trust Ingress API verifying DPoP & RSA signatures
 │   ├── ledger/                         # Transaction spend ledger & tamper-evident audit dashboard
 │   ├── network/                        # OpenZiti overlay mesh topology visualization

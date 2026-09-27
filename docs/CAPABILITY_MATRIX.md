@@ -112,6 +112,14 @@ Every control is categorized into one of three operational states:
   - Interactive Adversarial Prompt Injection Testbed in `src/components/MachineCustomerSimulator.tsx` with presets for OWASP Agentic threat vectors.
 - **Evidence**: `src/domain/services/agent_decision_engine.ts`, `src/domain/entities/taint_envelope.ts`, `src/components/MachineCustomerSimulator.tsx`, tested in `src/test/unit/agent_decision_engine.test.ts`, `src/test/adversarial/prompt_injection.test.ts`, and `src/hooks/use-simulation.test.tsx`.
 
+### 3.9. Standardized System Health & Kubernetes Probes (/api/health)
+- **Operational Reality**: **100% Real Diagnostic & Liveness/Readiness Engine**.
+- **Capabilities**:
+  - Dedicated `/api/health` route supporting fast liveness probes (`?probe=liveness`) and deep subsystem readiness evaluation (`?probe=readiness`).
+  - Actively validates persistence store responsiveness (`getSpendLedgerStore()`), OPA policy engine connectivity (`127.0.0.1:8181`), and continuous cryptographic audit trail integrity (`verifyIntegrity()`).
+  - Emits HTTP 503 Service Unavailable on readiness failures in strict environments, preventing faulty pods from receiving zero-trust ingress traffic.
+- **Evidence**: `src/app/api/health/route.ts`, `k8s/deployment.yaml`, tested in `src/test/integration/health_api.test.ts`.
+
 ---
 
 ## 4. Summary & Verification Instructions

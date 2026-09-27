@@ -207,3 +207,7 @@ export class AuditTrailManager {
 }
 
 export const globalAuditTrail = new AuditTrailManager();
+
+export function getAuditTrailManager(): AuditTrailManager {
+  return globalAuditTrail;
+}

@@ -51,7 +51,7 @@ spec:
               readOnly: true
           livenessProbe:
             httpGet:
-              path: /api/audit-trail
+              path: /api/health?probe=liveness
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 20
@@ -59,7 +59,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /api/audit-trail
+              path: /api/health?probe=readiness
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 10
